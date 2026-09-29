@@ -122,11 +122,16 @@ export const useWorkspaceStore = create<Workspace & WorkspaceActions>()((set, ge
 
   // ── Document actions ───────────────────────────────────────────────
   addDocument: (doc) => {
-    const id  = uuidv4()
-    const ts  = new Date().toISOString()
-    const newDoc: Document = { ...doc, id, createdAt: ts, updatedAt: ts }
-    set((state) => ({ documents: [...state.documents, newDoc] }))
+    const id      = uuidv4()
+    const ts      = new Date().toISOString()
+    const newDoc: Document  = { ...doc, id, createdAt: ts, updatedAt: ts }
+    const newNode: FileNode = { id, name: doc.title, type: doc.type, parentId: null, children: [], createdAt: ts }
+    set((state) => ({
+      documents: [...state.documents, newDoc],
+      fileNodes: [...state.fileNodes, newNode],
+    }))
     dbPost('/api/db/documents', newDoc)
+    dbPost('/api/db/filenodes', newNode)
     return id
   },
 
