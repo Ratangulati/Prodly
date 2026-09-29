@@ -1,4 +1,3 @@
-'use client'
 
 import { useState } from 'react'
 import {
@@ -47,7 +46,7 @@ export default function LeftSidebar({ onToggleTheme, theme }: LeftSidebarProps) 
           <Sparkles size={14} className="text-white" />
         </div>
         <span className="font-semibold text-sm tracking-tight" style={{ color: '#f0f0f0' }}>
-          Prodify-AI
+          Prodly
         </span>
       </div>
 

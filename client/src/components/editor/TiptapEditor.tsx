@@ -1,4 +1,3 @@
-'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
@@ -19,7 +18,7 @@ const INLINE_AI_ACTIONS = [
 ]
 
 export default function TiptapEditor({ docId }: { docId: string }) {
-  const { documents, updateDocument } = useWorkspaceStore()
+  const { documents, updateDocument, aiContentVersion } = useWorkspaceStore()
   const doc = documents.find((d) => d.id === docId)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -68,13 +67,13 @@ export default function TiptapEditor({ docId }: { docId: string }) {
     immediatelyRender: false,
   })
 
-  // Sync content when active doc changes
+  // Sync content when active doc changes or AI applies new content
   useEffect(() => {
     if (!editor || !doc) return
     if (editor.getHTML() !== doc.content) {
       editor.commands.setContent(doc.content)
     }
-  }, [docId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [docId, aiContentVersion]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Hide bubble on outside click
   useEffect(() => {

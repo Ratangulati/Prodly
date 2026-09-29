@@ -1,7 +1,6 @@
-'use client'
 
 import {
-  useState, useRef, useEffect, useCallback, useMemo,
+  Fragment, useState, useRef, useEffect, useCallback, useMemo,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -879,17 +878,15 @@ export default function AIChatPanel() {
             const active = workflow === wf.id
             const isChat = wf.isGeneral
             return (
-              <>
+              <Fragment key={wf.id}>
                 {/* Separator before the Chat tab */}
                 {isChat && (
                   <div
-                    key="sep"
                     className="flex-shrink-0 self-center mx-0.5"
                     style={{ width: 1, height: 16, background: '#2a2a2a' }}
                   />
                 )}
                 <button
-                  key={wf.id}
                   onClick={() => setWorkflow(wf.id)}
                   className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors relative whitespace-nowrap flex-shrink-0"
                   style={{
@@ -910,7 +907,7 @@ export default function AIChatPanel() {
                     />
                   )}
                 </button>
-              </>
+              </Fragment>
             )
           })}
         </div>

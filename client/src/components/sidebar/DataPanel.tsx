@@ -1,4 +1,3 @@
-'use client'
 
 import { useState, useRef } from 'react'
 import { TrendingUp, AlertTriangle, Lightbulb, ArrowRight, BarChart2, LineChart, Loader2, Upload, RefreshCw, FileText } from 'lucide-react'

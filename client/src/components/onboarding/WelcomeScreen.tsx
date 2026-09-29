@@ -1,4 +1,3 @@
-'use client'
 
 import { FileText, Map, FlaskConical, Sparkles, ArrowRight } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
@@ -65,7 +64,7 @@ export default function WelcomeScreen() {
           <Sparkles size={24} className="text-white" />
         </div>
         <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#f0f0f0' }}>
-          Welcome to Prodify-AI
+          Welcome to Prodly
         </h1>
         <p className="text-sm max-w-sm leading-relaxed" style={{ color: '#666' }}>
           Your AI-powered product management workspace. Get started by picking one of the quick starts below.
