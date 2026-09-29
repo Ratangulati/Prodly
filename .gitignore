@@ -1,13 +1,11 @@
 # ── Dependencies ────────────────────────────────────────────────────
-/node_modules
+node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
 
-# ── Next.js ─────────────────────────────────────────────────────────
-/.next/
-/out/
-/build
+# ── Build output ────────────────────────────────────────────────────
+dist/
 
 # ── Testing ─────────────────────────────────────────────────────────
 /coverage
@@ -23,13 +21,8 @@
 !.env.example
 
 # ── Database ─────────────────────────────────────────────────────────
-prisma/dev.db
-prisma/dev.db-journal
-prisma/*.db
-prisma/*.db-journal
-
-# ── Prisma generated client ──────────────────────────────────────────
-/lib/generated/
+server/prisma/*.db
+server/prisma/*.db-journal
 
 # ── Debug logs ───────────────────────────────────────────────────────
 npm-debug.log*
@@ -50,4 +43,3 @@ yarn-error.log*
 
 # ── TypeScript ───────────────────────────────────────────────────────
 *.tsbuildinfo
-next-env.d.ts
