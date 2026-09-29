@@ -5,6 +5,10 @@ const prisma = new PrismaClient()
 const now = new Date()
 
 async function main() {
+  // Skip if already seeded
+  const existing = await prisma.document.count()
+  if (existing > 0) { console.log('✓ Already seeded — skipping'); return }
+
   // ── Documents ──────────────────────────────────────────────────────
   const doc1 = await prisma.document.create({
     data: {
