@@ -1,4 +1,4 @@
-import type { AIWorkflow } from './types'
+import type { AIWorkflow } from './types.js'
 
 const SYSTEM_PROMPTS: Record<AIWorkflow, string> = {
   prd: `You are a Principal Product Manager with 12+ years writing PRDs at companies like Stripe, Figma, and Linear. Your PRDs are known for being precise, opinionated, and immediately actionable — engineers and designers can start working without needing a follow-up meeting.
