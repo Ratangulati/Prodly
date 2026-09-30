@@ -1,21 +1,42 @@
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { LayoutDashboard, Menu, Sparkles } from 'lucide-react'
+import { useMediaQuery } from '@/lib/useMediaQuery'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { useWorkspaceStore } from '@/lib/store'
 import LeftSidebar from './sidebar/LeftSidebar'
 import EditorPanel from './editor/EditorPanel'
 import RightPanel from './sidebar/RightPanel'
 import ToastContainer from './ui/Toast'
+import AppSkeleton from './ui/AppSkeleton'
 import CommandPalette from './modals/CommandPalette'
 import KeyboardShortcuts from './modals/KeyboardShortcuts'
 import WelcomeScreen from './onboarding/WelcomeScreen'
+import TasksBoard from './tasks/TasksBoard'
+import Dashboard from './dashboard/Dashboard'
+import GenerateTasksModal from './tasks/GenerateTasksModal'
 
 export default function AppShell() {
   const {
     documents, theme, setTheme,
     addDocument, setActiveDoc, setActiveSidebarTab,
     activeSidebarTab, loadWorkspace, isLoading,
+    mainView, taskReviewDocId, activeDocId,
   } = useWorkspaceStore()
+
+  // Below 1024px the three panels don't fit side by side; show one at a time with a tab bar
+  const compact = useMediaQuery('(max-width: 1023px)')
+  const [mobilePane, setMobilePane] = useState<'menu' | 'main' | 'ai'>('main')
+
+  // Opening a document, the board or home shows the main pane; switching AI tools shows the AI pane.
+  // Compared with the previous values so it only reacts to real changes.
+  const prev = useRef({ mainView, activeDocId, activeSidebarTab })
+  useEffect(() => {
+    const p = prev.current
+    if (p.activeSidebarTab !== activeSidebarTab) setMobilePane('ai')
+    else if (p.mainView !== mainView || p.activeDocId !== activeDocId) setMobilePane('main')
+    prev.current = { mainView, activeDocId, activeSidebarTab }
+  }, [mainView, activeDocId, activeSidebarTab])
 
   useEffect(() => { loadWorkspace() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -83,27 +104,69 @@ export default function AppShell() {
 
   const noDocuments = documents.length === 0
 
-  if (isLoading) {
+  if (isLoading) return <AppSkeleton />
+
+  const leftSidebar = (
+    <LeftSidebar
+      onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      onOpenSearch={() => setCmdPaletteOpen(true)}
+      theme={theme}
+    />
+  )
+  const mainContent = (
+    <div className="flex flex-col h-full overflow-hidden">
+      {mainView === 'tasks' ? <TasksBoard /> : mainView === 'home' ? <Dashboard /> : noDocuments ? <WelcomeScreen /> : <EditorPanel />}
+    </div>
+  )
+
+  const overlays = (
+    <>
+      <CommandPalette    open={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
+      <KeyboardShortcuts open={shortcutsOpen}  onClose={() => setShortcutsOpen(false)} />
+      {taskReviewDocId && <GenerateTasksModal key={taskReviewDocId} docId={taskReviewDocId} />}
+      <ToastContainer />
+    </>
+  )
+
+  if (compact) {
+    const tabs = [
+      { id: 'menu' as const, label: 'Menu', icon: <Menu size={18} /> },
+      { id: 'main' as const, label: 'Workspace', icon: <LayoutDashboard size={18} /> },
+      { id: 'ai' as const, label: 'AI & tools', icon: <Sparkles size={18} /> },
+    ]
     return (
-      <div className="h-screen flex items-center justify-center" style={{ background: '#0f0f0f' }}>
-        <div className="text-center space-y-3">
-          <div className="animate-spin inline-block w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full" />
-          <p className="text-xs" style={{ color: '#555' }}>Loading workspace…</p>
+      <>
+        <div className="h-[100dvh] flex flex-col overflow-hidden" style={{ background: '#0f0f0f' }}>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {mobilePane === 'menu' ? leftSidebar : mobilePane === 'ai' ? <RightPanel /> : mainContent}
+          </div>
+          <nav className="flex border-t flex-shrink-0" style={{ background: '#161616', borderColor: '#2a2a2a', paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            {tabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setMobilePane(t.id)}
+                className="flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium"
+                style={{ color: mobilePane === t.id ? '#a5b4fc' : '#71717a' }}
+                aria-current={mobilePane === t.id ? 'page' : undefined}
+              >
+                {t.icon}
+                {t.label}
+              </button>
+            ))}
+          </nav>
         </div>
-      </div>
+        {overlays}
+      </>
     )
   }
 
   return (
     <>
-      <div
-        className="h-screen overflow-hidden"
-        style={{ background: theme === 'dark' ? '#0f0f0f' : '#f5f5f5', minWidth: 1024 }}
-      >
+      <div className="h-screen overflow-hidden" style={{ background: '#0f0f0f' }}>
         <PanelGroup direction="horizontal" className="h-full">
           {/* Left sidebar */}
           <Panel defaultSize={18} minSize={12} maxSize={30}>
-            <LeftSidebar onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')} theme={theme} />
+            {leftSidebar}
           </Panel>
 
           <PanelResizeHandle className="group w-1 relative flex items-center justify-center" style={{ background: '#2a2a2a' }}>
@@ -112,9 +175,7 @@ export default function AppShell() {
 
           {/* Center editor */}
           <Panel minSize={30}>
-            <div className="flex flex-col h-full overflow-hidden">
-              {noDocuments ? <WelcomeScreen /> : <EditorPanel />}
-            </div>
+            {mainContent}
           </Panel>
 
           <PanelResizeHandle className="group w-1 relative flex items-center justify-center" style={{ background: '#2a2a2a' }}>
@@ -128,10 +189,7 @@ export default function AppShell() {
         </PanelGroup>
       </div>
 
-      {/* Overlays */}
-      <CommandPalette    open={cmdPaletteOpen} onClose={() => setCmdPaletteOpen(false)} />
-      <KeyboardShortcuts open={shortcutsOpen}  onClose={() => setShortcutsOpen(false)} />
-      <ToastContainer />
+      {overlays}
     </>
   )
 }
