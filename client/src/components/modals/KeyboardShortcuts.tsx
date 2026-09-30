@@ -7,7 +7,7 @@ interface KeyboardShortcutsProps {
 }
 
 const SHORTCUTS = [
-  { keys: ['⌘', 'K'],    label: 'Open AI command palette' },
+  { keys: ['⌘', 'K'],    label: 'Search, AI workflows and new documents' },
   { keys: ['⌘', 'N'],    label: 'New document' },
   { keys: ['⌘', 'S'],    label: 'Save document' },
   { keys: ['⌘', '/'],    label: 'Toggle AI sidebar' },
@@ -60,7 +60,7 @@ export default function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsPr
           <button
             onClick={onClose}
             className="ml-auto p-1 rounded hover:bg-white/10 transition-colors"
-            style={{ color: '#555' }}
+            style={{ color: '#8a8a93' }}
           >
             <X size={14} />
           </button>
@@ -69,7 +69,7 @@ export default function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsPr
         <div className="p-4 space-y-5">
           {/* Global */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: '#666' }}>
+            <p className="text-[11px] uppercase tracking-wider font-semibold mb-2" style={{ color: '#9d9da6' }}>
               Global
             </p>
             <div className="space-y-1">
@@ -84,7 +84,7 @@ export default function KeyboardShortcuts({ open, onClose }: KeyboardShortcutsPr
 
           {/* Editor */}
           <div>
-            <p className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: '#666' }}>
+            <p className="text-[11px] uppercase tracking-wider font-semibold mb-2" style={{ color: '#9d9da6' }}>
               Editor
             </p>
             <div className="space-y-1">
