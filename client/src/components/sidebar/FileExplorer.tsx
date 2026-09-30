@@ -56,7 +56,7 @@ function TypePicker({
         className="rounded-md p-2"
         style={{ background: '#111', border: `1px solid ${BORDER}` }}
       >
-        <p className="text-[9px] uppercase tracking-widest mb-2" style={{ color: MUTED }}>
+        <p className="text-[10px] uppercase tracking-widest mb-2" style={{ color: MUTED }}>
           Select type
         </p>
         <div className="grid grid-cols-2 gap-1">
@@ -301,7 +301,7 @@ function TreeNode({ node, depth, tree }: { node: FileNode; depth: number; tree: 
           {children.length === 0 && !showPicker && tree.creating?.parentId !== node.id && (
             <p
               className="text-[11px] italic"
-              style={{ paddingLeft: (depth + 1) * 14 + 22, paddingTop: 3, paddingBottom: 3, color: '#3a3a3a' }}
+              style={{ paddingLeft: (depth + 1) * 14 + 22, paddingTop: 3, paddingBottom: 3, color: '#7a7a83' }}
             >
               Empty folder
             </p>
@@ -422,11 +422,11 @@ export default function FileExplorer() {
         className="flex-shrink-0 flex items-center gap-2 px-3 pb-1.5"
         style={{ borderBottom: `1px solid ${BORDER}` }}
       >
-        <span className="text-[10px] uppercase tracking-wider font-medium" style={{ color: MUTED }}>
+        <span className="text-[11px] uppercase tracking-wider font-medium" style={{ color: MUTED }}>
           Files
         </span>
         <span
-          className="text-[10px] px-1.5 py-0.5 rounded-full ml-auto"
+          className="text-[11px] px-1.5 py-0.5 rounded-full ml-auto"
           style={{ background: '#2a2a2a', color: MUTED }}
         >
           {fileNodes.filter(n => n.type !== 'folder').length}
@@ -451,8 +451,8 @@ export default function FileExplorer() {
 
         {rootNodes.length === 0 && !creating && !docPickerOpen && (
           <div className="px-3 py-8 text-center space-y-1">
-            <p className="text-xs" style={{ color: '#555' }}>No files yet</p>
-            <p className="text-[10px]" style={{ color: '#444' }}>
+            <p className="text-xs" style={{ color: '#8a8a93' }}>No files yet</p>
+            <p className="text-[11px]" style={{ color: '#7a7a83' }}>
               Create a folder or document above
             </p>
           </div>

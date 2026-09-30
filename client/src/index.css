@@ -26,6 +26,39 @@
   .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 }
 
+/* ── Keyboard focus ──────────────────────────────────────────────
+   Many controls use outline-none for mouse users; keyboard users still get a clear ring. */
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #818cf8 !important;
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid rgba(129, 140, 248, 0.7) !important;
+  outline-offset: 0;
+}
+/* The rich-text editor shows its own caret; a ring around the whole document is noise */
+.ProseMirror:focus-visible { outline: none !important; }
+
+::placeholder { color: #7a7a83; opacity: 1; }
+
+/* ── Light theme ─────────────────────────────────────────────────
+   The interface is designed dark with inline colours. Light mode inverts it and
+   rotates hues back, so accents keep their colour family. Media is flipped back. */
+html.light,
+html.light body { background: #f4f4f5; }
+html.light #root { filter: invert(1) hue-rotate(180deg); min-height: 100vh; }
+html.light #root img,
+html.light #root video,
+html.light #root canvas { filter: invert(1) hue-rotate(180deg); }
+
 /* ── Global keyframe animations ─────────────────────────────────── */
 @keyframes blink {
   0%, 100% { opacity: 1; }
@@ -259,3 +292,13 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+/* ── Rendered AI markdown (stakeholder updates) ─────────────────── */
+.update-markdown h1, .update-markdown h2, .update-markdown h3 { color: #f4f4f5; font-weight: 600; margin: 0.9em 0 0.35em; }
+.update-markdown h1 { font-size: 1.05rem; } .update-markdown h2, .update-markdown h3 { font-size: 0.95rem; }
+.update-markdown > :first-child { margin-top: 0; }
+.update-markdown p { margin: 0 0 0.6em; }
+.update-markdown ul, .update-markdown ol { margin: 0 0 0.6em; padding-left: 1.25rem; }
+.update-markdown ul { list-style: disc; } .update-markdown ol { list-style: decimal; }
+.update-markdown li { margin: 0.15em 0; }
+.update-markdown strong { color: #f4f4f5; }

@@ -20,9 +20,11 @@ export const useToastStore = create<ToastStore>((set) => ({
   addToast: (message, type = 'success') => {
     const id = uuidv4()
     set((state) => ({ toasts: [...state.toasts, { id, message, type }] }))
+    // Errors explain what went wrong, so they stay long enough to read
+    const duration = type === 'error' ? 8000 : type === 'info' ? 6000 : 3500
     setTimeout(() => {
       set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) }))
-    }, 3500)
+    }, duration)
   },
   removeToast: (id) =>
     set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),

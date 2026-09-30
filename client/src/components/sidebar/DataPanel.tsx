@@ -2,6 +2,8 @@
 import { useState, useRef } from 'react'
 import { TrendingUp, AlertTriangle, Lightbulb, ArrowRight, BarChart2, LineChart, Loader2, Upload, RefreshCw, FileText } from 'lucide-react'
 import { toast } from '@/lib/toast'
+import { AIError, isAbort, streamAI, toAIError } from '@/lib/ai'
+import { AIErrorNotice, SlowAINotice, useSlowAI } from '@/components/ui/AIStatus'
 import {
   LineChart as ReLineChart,
   BarChart as ReBarChart,
@@ -50,7 +52,7 @@ function confidenceBadge(c: Confidence) {
   const s = map[c]
   return (
     <span
-      className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
+      className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
       style={{ background: s.bg, color: s.color }}
     >
       {s.label}
@@ -125,17 +127,17 @@ function InsightCard({ insight }: { insight: DataInsight }) {
       {insightIcon(insight.type)}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1 flex-wrap">
-          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: '#555' }}>
+          <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: '#8a8a93' }}>
             {TYPE_LABELS[insight.type]}
           </span>
           {insight.metric && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#1e1e1e', color: '#888' }}>
+            <span className="text-[11px] px-1.5 py-0.5 rounded" style={{ background: '#1e1e1e', color: '#888' }}>
               {insight.metric}
             </span>
           )}
           {insight.delta && (
             <span
-              className="text-[10px] font-semibold"
+              className="text-[11px] font-semibold"
               style={{ color: insight.delta.startsWith('+') ? '#4ade80' : '#f87171' }}
             >
               {insight.delta}
@@ -192,7 +194,7 @@ function DataChart({ result }: { result: AnalysisResult }) {
               labelStyle={{ color: '#999' }}
               itemStyle={{ color: '#ccc' }}
             />
-            <Legend wrapperStyle={{ fontSize: 10, color: '#666' }} />
+            <Legend wrapperStyle={{ fontSize: 10, color: '#9d9da6' }} />
             {(result.chartKeys || ['value']).map((key, i) => (
               <Line
                 key={key}
@@ -215,7 +217,7 @@ function DataChart({ result }: { result: AnalysisResult }) {
               labelStyle={{ color: '#999' }}
               itemStyle={{ color: '#ccc' }}
             />
-            <Legend wrapperStyle={{ fontSize: 10, color: '#666' }} />
+            <Legend wrapperStyle={{ fontSize: 10, color: '#9d9da6' }} />
             {(result.chartKeys || ['value']).map((key, i) => (
               <Bar
                 key={key}
@@ -245,6 +247,8 @@ export default function DataPanel() {
   const [input, setInput]           = useState('')
   const [status, setStatus]         = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [streamText, setStreamText] = useState('')
+  const [aiError, setAiError] = useState<AIError | null>(null)
+  const slow = useSlowAI(status === 'loading' && !streamText)
   const [result, setResult]         = useState<AnalysisResult | null>(null)
   const [filter, setFilter]         = useState<DataInsight['type'] | 'all'>('all')
   const [isDragging, setIsDragging] = useState(false)
@@ -296,44 +300,26 @@ export default function DataPanel() {
     setStatus('loading')
     setStreamText('')
     setResult(null)
+    setAiError(null)
 
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: ctrl.signal,
-        body: JSON.stringify({
-          workflow: 'data',
-          userMessage: `${DATA_PROMPT}\n\nData to analyse:\n${input}`,
-          documentContext: null,
-          conversationHistory: [],
-        }),
-      })
-
-      if (!res.ok || !res.body) throw new Error('Stream failed')
-
-      const reader  = res.body.getReader()
-      const decoder = new TextDecoder()
-      let   full    = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value)
-        full += chunk
-        setStreamText(full)
-      }
+      const full = await streamAI(
+        { workflow: 'data', userMessage: `${DATA_PROMPT}\n\nData to analyse:\n${input}` },
+        { signal: ctrl.signal, onText: setStreamText },
+      )
 
       const parsed = extractJSON(full)
-      if (parsed) {
-        setResult(parsed)
-        setStatus('done')
-        toast.success(`Analysis complete — ${parsed.insights.length} insights found`)
-      } else {
+      if (!parsed) {
+        throw new AIError('failed', "The AI couldn't turn this into an analysis. Check that your data has clear column headers, then try again.")
+      }
+      setResult(parsed)
+      setStatus('done')
+      toast.success(`Analysis complete — ${parsed.insights.length} insights found`)
+    } catch (err: unknown) {
+      if (!isAbort(err)) {
+        setAiError(toAIError(err))
         setStatus('error')
       }
-    } catch (err: unknown) {
-      if (err instanceof Error && err.name !== 'AbortError') setStatus('error')
     }
   }
 
@@ -361,13 +347,13 @@ export default function DataPanel() {
       >
         <div>
           <p className="text-xs font-semibold" style={{ color: '#ddd' }}>Data Analysis</p>
-          <p className="text-[10px]" style={{ color: '#555' }}>Upload, paste, or drag CSV → AI interprets</p>
+          <p className="text-[11px]" style={{ color: '#8a8a93' }}>Upload, paste, or drag CSV → AI interprets</p>
         </div>
         {result && (
           <button
             onClick={reset}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs transition-colors hover:bg-white/5"
-            style={{ color: '#666' }}
+            style={{ color: '#9d9da6' }}
           >
             <RefreshCw size={11} />
             Reset
@@ -400,7 +386,7 @@ export default function DataPanel() {
                 <FileText size={12} />
                 Upload CSV
               </button>
-              <span className="text-[10px]" style={{ color: '#444' }}>or paste data below</span>
+              <span className="text-[11px]" style={{ color: '#7a7a83' }}>or paste data below</span>
             </div>
 
             <div
@@ -437,8 +423,8 @@ export default function DataPanel() {
               />
               {input && (
                 <span
-                  className="absolute bottom-2 right-2 text-[10px]"
-                  style={{ color: '#444' }}
+                  className="absolute bottom-2 right-2 text-[11px]"
+                  style={{ color: '#7a7a83' }}
                 >
                   {input.split('\n').length} lines
                 </span>
@@ -473,23 +459,17 @@ export default function DataPanel() {
         {/* Streaming preview */}
         {status === 'loading' && streamText && (
           <div
-            className="rounded-lg p-3 text-[10px] font-mono leading-relaxed max-h-32 overflow-y-auto"
-            style={{ background: '#111', color: '#555', border: '1px solid #222' }}
+            className="rounded-lg p-3 text-[11px] font-mono leading-relaxed max-h-32 overflow-y-auto"
+            style={{ background: '#111', color: '#8a8a93', border: '1px solid #222' }}
           >
             {streamText.slice(-600)}
             <span className="animate-pulse">▌</span>
           </div>
         )}
 
-        {/* Error */}
-        {status === 'error' && (
-          <div
-            className="rounded-lg p-3 text-xs"
-            style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: '#f87171' }}
-          >
-            Analysis failed. Check that your data has clear column headers and try again.
-          </div>
-        )}
+        {/* Slow / error */}
+        {slow && <SlowAINotice compact />}
+        {status === 'error' && aiError && <AIErrorNotice compact error={aiError} onRetry={analyse} />}
 
         {/* Results */}
         {result && status === 'done' && (
@@ -499,7 +479,7 @@ export default function DataPanel() {
               className="rounded-lg p-3"
               style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.15)' }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#818cf8' }}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: '#818cf8' }}>
                 Summary
               </p>
               <p className="text-xs leading-relaxed" style={{ color: '#ccc' }}>{result.summary}</p>
@@ -523,7 +503,7 @@ export default function DataPanel() {
                     onClick={() => setFilter(filter === t ? 'all' : t)}
                   >
                     <p className="text-base font-bold" style={{ color: filter === t ? '#818cf8' : '#ccc' }}>{count}</p>
-                    <p className="text-[9px] uppercase tracking-wide leading-tight" style={{ color: '#555' }}>
+                    <p className="text-[10px] uppercase tracking-wide leading-tight" style={{ color: '#8a8a93' }}>
                       {TYPE_LABELS[t].slice(0, 6)}
                     </p>
                   </div>
@@ -537,7 +517,7 @@ export default function DataPanel() {
                 <button
                   key={f.id}
                   onClick={() => setFilter(f.id as DataInsight['type'] | 'all')}
-                  className="px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors"
+                  className="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors"
                   style={{
                     background: filter === f.id ? 'rgba(99,102,241,0.2)' : '#252525',
                     color: filter === f.id ? '#818cf8' : '#666',
@@ -552,7 +532,7 @@ export default function DataPanel() {
             {/* Insight cards */}
             <div className="flex flex-col gap-2">
               {filteredInsights.length === 0 ? (
-                <p className="text-xs text-center py-6" style={{ color: '#555' }}>
+                <p className="text-xs text-center py-6" style={{ color: '#8a8a93' }}>
                   No {filter === 'all' ? 'insights' : TYPE_LABELS[filter as DataInsight['type']].toLowerCase()} found.
                 </p>
               ) : (
@@ -566,7 +546,7 @@ export default function DataPanel() {
             <button
               onClick={reset}
               className="flex items-center justify-center gap-2 w-full py-2 rounded-lg text-xs transition-colors hover:bg-white/5"
-              style={{ color: '#555', border: '1px solid #2a2a2a' }}
+              style={{ color: '#8a8a93', border: '1px solid #2a2a2a' }}
             >
               <RefreshCw size={11} />
               Analyse different data

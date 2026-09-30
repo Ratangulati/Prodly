@@ -2,11 +2,13 @@
 import { useState } from 'react'
 import {
   Sparkles, ChevronDown, ChevronRight,
-  Circle, User, Sun, Moon, Keyboard,
+  Circle, Sun, Moon, Keyboard, ListChecks, Search, LayoutDashboard,
 } from 'lucide-react'
 import type { Theme, FeatureStatus } from '@/lib/types'
 import { useWorkspaceStore } from '@/lib/store'
 import FileExplorer from './FileExplorer'
+import AccountMenu from './AccountMenu'
+import MentionsInbox from '@/components/comments/MentionsInbox'
 
 const STATUS_COLORS: Record<FeatureStatus, string> = {
   Now:  '#22c55e',
@@ -17,11 +19,13 @@ const STATUS_COLORS: Record<FeatureStatus, string> = {
 
 interface LeftSidebarProps {
   onToggleTheme: () => void
+  onOpenSearch: () => void
   theme: Theme
 }
 
-export default function LeftSidebar({ onToggleTheme, theme }: LeftSidebarProps) {
-  const { features } = useWorkspaceStore()
+export default function LeftSidebar({ onToggleTheme, onOpenSearch, theme }: LeftSidebarProps) {
+  const { features, tasks, mainView, openTasks, setMainView } = useWorkspaceStore()
+  const openTaskCount = tasks.filter((t) => t.status !== 'done').length
   const [featuresOpen, setFeaturesOpen] = useState(true)
 
   const counts = features.reduce<Record<string, number>>((acc, f) => {
@@ -50,6 +54,46 @@ export default function LeftSidebar({ onToggleTheme, theme }: LeftSidebarProps) 
         </span>
       </div>
 
+      {/* Search + Tasks board */}
+      <div className="px-2 pt-2 flex-shrink-0 space-y-0.5">
+        <button
+          onClick={onOpenSearch}
+          className="flex items-center gap-2 w-full px-2.5 py-2 rounded-md text-xs transition-colors hover:bg-white/5"
+          style={{ color: '#a1a1aa' }}
+        >
+          <Search size={14} style={{ color: '#9d9da6' }} />
+          Search
+          <kbd className="ml-auto text-[10px] px-1.5 py-0.5 rounded" style={{ background: '#262626', color: '#9d9da6' }}>⌘K</kbd>
+        </button>
+        <button
+          onClick={() => setMainView('home')}
+          className="flex items-center gap-2 w-full px-2.5 py-2 rounded-md text-xs font-medium transition-colors hover:bg-white/5"
+          style={{
+            background: mainView === 'home' ? 'rgba(99,102,241,0.14)' : 'transparent',
+            color: mainView === 'home' ? '#c7d2fe' : '#a1a1aa',
+          }}
+        >
+          <LayoutDashboard size={14} style={{ color: mainView === 'home' ? '#818cf8' : '#71717a' }} />
+          Home
+        </button>
+        <button
+          onClick={() => openTasks()}
+          className="flex items-center gap-2 w-full px-2.5 py-2 rounded-md text-xs font-medium transition-colors hover:bg-white/5"
+          style={{
+            background: mainView === 'tasks' ? 'rgba(99,102,241,0.14)' : 'transparent',
+            color: mainView === 'tasks' ? '#c7d2fe' : '#a1a1aa',
+          }}
+        >
+          <ListChecks size={14} style={{ color: mainView === 'tasks' ? '#818cf8' : '#71717a' }} />
+          Tasks
+          {openTaskCount > 0 && (
+            <span className="ml-auto px-1.5 rounded text-[11px] font-semibold tabular-nums" style={{ background: '#27272a', color: '#a1a1aa' }}>
+              {openTaskCount}
+            </span>
+          )}
+        </button>
+      </div>
+
       {/* File Explorer */}
       <FileExplorer />
 
@@ -61,7 +105,7 @@ export default function LeftSidebar({ onToggleTheme, theme }: LeftSidebarProps) 
           style={{ color: '#888' }}
         >
           {featuresOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-          <span className="text-[10px] uppercase tracking-wider">Features</span>
+          <span className="text-[11px] uppercase tracking-wider">Features</span>
         </button>
 
         {featuresOpen && (
@@ -90,24 +134,17 @@ export default function LeftSidebar({ onToggleTheme, theme }: LeftSidebarProps) 
         className="flex items-center gap-2 px-3 py-2.5 border-t flex-shrink-0"
         style={{ borderColor: '#2a2a2a' }}
       >
-        <div
-          className="flex items-center justify-center rounded-full flex-shrink-0"
-          style={{ width: 26, height: 26, background: '#333', color: '#aaa' }}
-        >
-          <User size={13} />
-        </div>
-        <p className="text-[11px] font-medium truncate flex-1" style={{ color: '#ddd' }}>
-          Product Manager
-        </p>
+        <AccountMenu />
+        <MentionsInbox />
         <button
           onClick={onToggleTheme}
           className="p-1.5 rounded transition-colors hover:bg-white/10 flex-shrink-0"
-          style={{ color: '#555' }}
+          style={{ color: '#8a8a93' }}
           title={theme === 'dark' ? 'Switch to light' : 'Switch to dark'}
         >
           {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
         </button>
-        <span className="flex-shrink-0" style={{ color: '#555' }} title="Press ? for shortcuts">
+        <span className="flex-shrink-0" style={{ color: '#8a8a93' }} title="Press ? for shortcuts">
           <Keyboard size={13} />
         </span>
       </div>

@@ -66,7 +66,7 @@ export default function WelcomeScreen() {
         <h1 className="text-2xl font-bold tracking-tight" style={{ color: '#f0f0f0' }}>
           Welcome to Prodly
         </h1>
-        <p className="text-sm max-w-sm leading-relaxed" style={{ color: '#666' }}>
+        <p className="text-sm max-w-sm leading-relaxed" style={{ color: '#9d9da6' }}>
           Your AI-powered product management workspace. Get started by picking one of the quick starts below.
         </p>
       </div>
@@ -102,8 +102,8 @@ export default function WelcomeScreen() {
         ))}
       </div>
 
-      <p className="mt-8 text-[11px]" style={{ color: '#444' }}>
-        Or use <kbd className="px-1.5 py-0.5 rounded text-[10px]" style={{ background: '#1e1e1e', color: '#666' }}>⌘K</kbd> to open the command palette
+      <p className="mt-8 text-[11px]" style={{ color: '#7a7a83' }}>
+        Or use <kbd className="px-1.5 py-0.5 rounded text-[11px]" style={{ background: '#1e1e1e', color: '#9d9da6' }}>⌘K</kbd> to open the command palette
       </p>
     </div>
   )

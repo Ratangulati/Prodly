@@ -8,8 +8,12 @@ import {
   Send, Copy, Check, Trash2, FileText, BookOpen,
   Map, BarChart3, FlaskConical, TrendingUp, Wand2,
   ToggleLeft, ToggleRight, ChevronRight, Code2, MessageSquare,
+  Undo2, X, ListPlus, Sparkles, ChevronDown,
 } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
+import { AIError, isAbort, streamAI, toAIError } from '@/lib/ai'
+import { AIErrorNotice, SlowAINotice, useSlowAI } from '@/components/ui/AIStatus'
+import { markdownToHtml } from '@/lib/markdown'
 import type { AIWorkflow, AIMessage, DocumentType } from '@/lib/types'
 
 /* ── Workflow tab definitions ───────────────────────────────────── */
@@ -231,7 +235,7 @@ const MarkdownComponents = {
     <tr style={{ borderBottom: '1px solid #27272a' }}>{children}</tr>
   ),
   th: ({ children }: { children?: React.ReactNode }) => (
-    <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-[10px]" style={{ color: '#71717a' }}>{children}</th>
+    <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-[11px]" style={{ color: '#9d9da6' }}>{children}</th>
   ),
   td: ({ children }: { children?: React.ReactNode }) => (
     <td className="px-3 py-2" style={{ color: '#d4d4d8' }}>{children}</td>
@@ -247,80 +251,31 @@ function extractSections(md: string): string[] {
     .slice(0, 8)
 }
 
-/* ── Markdown → Tiptap-compatible HTML ─────────────────────────── */
-function markdownToHtml(md: string): string {
-  const lines = md.split('\n')
-  const html: string[] = []
-  let inUl = false
-  let inOl = false
-  let inPre = false
-  let preLines: string[] = []
-
-  const flushList = () => {
-    if (inUl) { html.push('</ul>'); inUl = false }
-    if (inOl) { html.push('</ol>'); inOl = false }
-  }
-
-  const inline = (t: string) =>
-    t
-      .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.+?)\*/g, '<em>$1</em>')
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-
-  for (const raw of lines) {
-    const line = raw
-
-    // fenced code block
-    if (line.startsWith('```')) {
-      if (!inPre) { flushList(); inPre = true; preLines = [] }
-      else { html.push(`<pre><code>${preLines.join('\n')}</code></pre>`); inPre = false }
-      continue
-    }
-    if (inPre) { preLines.push(line); continue }
-
-    // headings
-    if (/^### /.test(line)) { flushList(); html.push(`<h3>${inline(line.slice(4))}</h3>`); continue }
-    if (/^## /.test(line))  { flushList(); html.push(`<h2>${inline(line.slice(3))}</h2>`); continue }
-    if (/^# /.test(line))   { flushList(); html.push(`<h1>${inline(line.slice(2))}</h1>`); continue }
-
-    // hr
-    if (/^---+$/.test(line.trim())) { flushList(); html.push('<hr>'); continue }
-
-    // blockquote
-    if (/^> /.test(line)) { flushList(); html.push(`<blockquote><p>${inline(line.slice(2))}</p></blockquote>`); continue }
-
-    // unordered list
-    if (/^[-*] /.test(line)) {
-      if (inOl) { html.push('</ol>'); inOl = false }
-      if (!inUl) { html.push('<ul>'); inUl = true }
-      html.push(`<li>${inline(line.slice(2))}</li>`)
-      continue
-    }
-
-    // ordered list
-    if (/^\d+\. /.test(line)) {
-      if (inUl) { html.push('</ul>'); inUl = false }
-      if (!inOl) { html.push('<ol>'); inOl = true }
-      html.push(`<li>${inline(line.replace(/^\d+\. /, ''))}</li>`)
-      continue
-    }
-
-    flushList()
-
-    if (line.trim() === '') { html.push('<p></p>'); continue }
-    html.push(`<p>${inline(line)}</p>`)
-  }
-
-  flushList()
-  if (inPre) html.push(`<pre><code>${preLines.join('\n')}</code></pre>`)
-
-  return html.join('')
-}
 
 /* ── Diff utilities ─────────────────────────────────────────────── */
-type AppliedDoc = { title: string; before: string; after: string }
+/**
+ * An AI edit to a document. Edits to a document that already has content start as
+ * 'pending' and only touch the editor once the user accepts or inserts them.
+ */
+type AppliedDoc = {
+  docId: string
+  title: string
+  /** Document HTML when the AI was asked, used for the diff. */
+  before: string
+  /** The AI's markdown output. */
+  after: string
+  status: 'pending' | 'applied' | 'inserted' | 'discarded'
+  /** Document HTML right before the edit was applied, restored by Undo. */
+  restore?: string
+}
+
+interface ProposalActions {
+  onAccept: () => void
+  onInsert: () => void
+  onDiscard: () => void
+  onUndo: () => void
+  onGenerateTasks?: () => void
+}
 type DiffLine   = { type: 'unchanged' | 'added' | 'removed'; text: string }
 
 function htmlToLines(html: string): string[] {
@@ -401,7 +356,7 @@ function DiffView({ before, after }: { before: string; after: string }) {
 
   if (added === 0 && removed === 0) {
     return (
-      <div className="px-3.5 py-3 text-xs text-center" style={{ color: '#52525b', background: '#111113' }}>
+      <div className="px-3.5 py-3 text-xs text-center" style={{ color: '#8a8a93', background: '#111113' }}>
         No changes detected
       </div>
     )
@@ -410,9 +365,9 @@ function DiffView({ before, after }: { before: string; after: string }) {
   return (
     <div style={{ maxHeight: 260, overflowY: 'auto', background: '#0d0d0f' }}>
       <div className="flex items-center gap-3 px-3.5 py-1.5 border-b" style={{ borderColor: '#1e1e22' }}>
-        <span className="text-[10px] font-mono font-medium" style={{ color: '#22c55e' }}>+{added}</span>
-        <span className="text-[10px] font-mono font-medium" style={{ color: '#ef4444' }}>−{removed}</span>
-        <span className="text-[10px]" style={{ color: '#3f3f46' }}>lines changed</span>
+        <span className="text-[11px] font-mono font-medium" style={{ color: '#22c55e' }}>+{added}</span>
+        <span className="text-[11px] font-mono font-medium" style={{ color: '#ef4444' }}>−{removed}</span>
+        <span className="text-[11px]" style={{ color: '#7a7a83' }}>lines changed</span>
       </div>
       <div>
         {diff.map((line, idx) => {
@@ -448,12 +403,13 @@ function DiffView({ before, after }: { before: string; after: string }) {
 
 /* ── Message bubble ──────────────────────────────────────────────── */
 function MessageBubble({
-  msg, isStreaming, appliedDoc, writingToDoc,
+  msg, isStreaming, appliedDoc, writingToDoc, actions,
 }: {
   msg: AIMessage & { streaming?: boolean }
   isStreaming?: boolean
   appliedDoc?: AppliedDoc
   writingToDoc?: string
+  actions?: ProposalActions
 }) {
   const [showDiff, setShowDiff] = useState(false)
   const appliedDocTitle = appliedDoc?.title
@@ -470,7 +426,7 @@ function MessageBubble({
           >
             {msg.content}
           </div>
-          <p className="text-right mt-1 text-[10px]" style={{ color: '#3f3f46' }}>{timeStr}</p>
+          <p className="text-right mt-1 text-[11px]" style={{ color: '#7a7a83' }}>{timeStr}</p>
         </div>
       </div>
     )
@@ -488,7 +444,7 @@ function MessageBubble({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1.5">
           <span className="text-xs font-semibold" style={{ color: '#818cf8' }}>AI</span>
-          <span className="text-[10px]" style={{ color: '#3f3f46' }}>{timeStr}</span>
+          <span className="text-[11px]" style={{ color: '#7a7a83' }}>{timeStr}</span>
           <div className="ml-auto">
             <CopyButton text={msg.content} />
           </div>
@@ -504,8 +460,8 @@ function MessageBubble({
               <Wand2 size={13} style={{ color: '#6366f1' }} />
             </span>
             <div>
-              <p className="text-xs font-medium" style={{ color: '#a5b4fc' }}>Writing to editor…</p>
-              <p className="text-[11px] mt-0.5 truncate max-w-[200px]" style={{ color: '#52525b' }}>{writingToDoc}</p>
+              <p className="text-xs font-medium" style={{ color: '#a5b4fc' }}>Drafting changes…</p>
+              <p className="text-[11px] mt-0.5 truncate max-w-[200px]" style={{ color: '#8a8a93' }}>{writingToDoc}</p>
             </div>
           </div>
         ) : appliedDocTitle ? (
@@ -519,14 +475,28 @@ function MessageBubble({
               className="flex items-center gap-2 px-3.5 py-2.5"
               style={{ background: '#18181b', borderBottom: '1px solid #27272a' }}
             >
-              <Check size={13} style={{ color: '#22c55e' }} />
+              {appliedDoc?.status === 'pending' ? (
+                <Wand2 size={13} style={{ color: '#fbbf24' }} />
+              ) : appliedDoc?.status === 'discarded' ? (
+                <X size={13} style={{ color: '#9d9da6' }} />
+              ) : (
+                <Check size={13} style={{ color: '#22c55e' }} />
+              )}
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold" style={{ color: '#22c55e' }}>Applied to editor</p>
-                <p className="text-[11px] truncate" style={{ color: '#52525b' }}>{appliedDocTitle}</p>
+                <p
+                  className="text-xs font-semibold"
+                  style={{ color: appliedDoc?.status === 'pending' ? '#fbbf24' : appliedDoc?.status === 'discarded' ? '#71717a' : '#22c55e' }}
+                >
+                  {appliedDoc?.status === 'pending' ? 'Proposed changes'
+                    : appliedDoc?.status === 'discarded' ? 'Discarded'
+                    : appliedDoc?.status === 'inserted' ? 'Added below existing content'
+                    : 'Applied to editor'}
+                </p>
+                <p className="text-[11px] truncate" style={{ color: '#8a8a93' }}>{appliedDocTitle}</p>
               </div>
               <button
                 onClick={() => setShowDiff((v) => !v)}
-                className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium transition-colors flex-shrink-0"
+                className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors flex-shrink-0"
                 style={{
                   background: showDiff ? 'rgba(99,102,241,0.15)' : '#27272a',
                   color: showDiff ? '#a5b4fc' : '#52525b',
@@ -544,13 +514,72 @@ function MessageBubble({
                 {extractSections(msg.content).map((s, i) => (
                   <div key={i} className="flex items-center gap-2 py-0.5">
                     <span style={{ width: 4, height: 4, borderRadius: '50%', background: '#3f3f46', display: 'inline-block', flexShrink: 0 }} />
-                    <span className="text-[11px] truncate" style={{ color: '#71717a' }}>{s}</span>
+                    <span className="text-[11px] truncate" style={{ color: '#9d9da6' }}>{s}</span>
                   </div>
                 ))}
               </div>
             )}
             {showDiff && appliedDoc && (
               <DiffView before={appliedDoc.before} after={appliedDoc.after} />
+            )}
+            {appliedDoc && actions && (
+              <div className="flex items-center gap-1.5 px-3 py-2 flex-wrap" style={{ background: '#18181b', borderTop: '1px solid #27272a' }}>
+                {appliedDoc.status === 'pending' || appliedDoc.status === 'discarded' ? (
+                  <>
+                    <button
+                      onClick={actions.onAccept}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium"
+                      style={{ background: '#6366f1', color: '#fff' }}
+                      title="Replace the document with this version"
+                    >
+                      <Check size={11} />
+                      Accept
+                    </button>
+                    <button
+                      onClick={actions.onInsert}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium transition-colors hover:bg-white/10"
+                      style={{ border: '1px solid #3f3f46', color: '#d4d4d8' }}
+                      title="Keep the document and add this below it"
+                    >
+                      <ListPlus size={11} />
+                      Insert below
+                    </button>
+                    {appliedDoc.status === 'pending' && (
+                      <button
+                        onClick={actions.onDiscard}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] transition-colors hover:bg-white/5"
+                        style={{ color: '#a1a1aa' }}
+                      >
+                        <X size={11} />
+                        Discard
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={actions.onUndo}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] transition-colors hover:bg-white/10"
+                      style={{ border: '1px solid #3f3f46', color: '#d4d4d8' }}
+                      title="Restore the document to how it was before this change"
+                    >
+                      <Undo2 size={11} />
+                      Undo
+                    </button>
+                    {actions.onGenerateTasks && (
+                      <button
+                        onClick={actions.onGenerateTasks}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium"
+                        style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc', border: '1px solid rgba(99,102,241,0.35)' }}
+                        title="Break this PRD into tasks for the board"
+                      >
+                        <Sparkles size={11} />
+                        Generate tasks
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
             )}
           </div>
         ) : (
@@ -571,6 +600,82 @@ function MessageBubble({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ── AI mode picker ──────────────────────────────────────────────── */
+const WORKFLOW_HINTS: Record<AIWorkflow, string> = {
+  prd:            'Writes and edits PRDs in the editor',
+  stories:        'Writes user stories with acceptance criteria',
+  roadmap:        'Plans and sequences your roadmap',
+  prioritization: 'Scores and ranks features',
+  research:       'Synthesises user research',
+  data:           'Analyses metrics and funnels',
+  general:        'Free chat: answers here, never edits documents',
+}
+
+function ModeMenu({ value, onChange }: { value: AIWorkflow; onChange: (w: AIWorkflow) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const current = WORKFLOWS.find((w) => w.id === value) ?? WORKFLOWS[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative flex-shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 pl-2 pr-1.5 py-1 rounded-lg text-xs font-medium transition-colors hover:bg-white/5"
+        style={{ background: '#18181b', border: '1px solid #2e2e32', color: '#e4e4e7' }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`AI mode: ${current.label}`}
+      >
+        <span className="text-[10px] uppercase tracking-wider" style={{ color: '#8a8a93' }}>Mode</span>
+        {current.isGeneral ? <MessageSquare size={12} style={{ color: '#34d399' }} /> : <span>{current.emoji}</span>}
+        {current.label}
+        <ChevronDown size={12} style={{ color: '#8a8a93' }} />
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          aria-label="AI mode"
+          className="absolute left-0 top-full mt-1.5 z-40 w-72 rounded-xl py-1.5 shadow-2xl"
+          style={{ background: '#18181b', border: '1px solid #2e2e32' }}
+        >
+          {WORKFLOWS.map((wf) => {
+            const active = wf.id === value
+            return (
+              <li key={wf.id}>
+                <button
+                  role="option"
+                  aria-selected={active}
+                  onClick={() => { onChange(wf.id); setOpen(false) }}
+                  className="flex items-start gap-2.5 w-full px-3 py-2 text-left transition-colors hover:bg-white/5"
+                  style={{ background: active ? 'rgba(99,102,241,0.12)' : undefined }}
+                >
+                  <span className="w-4 flex-shrink-0 text-center">
+                    {wf.isGeneral ? <MessageSquare size={13} style={{ color: '#34d399' }} /> : wf.emoji}
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-xs font-medium" style={{ color: active ? '#e0e7ff' : '#e4e4e7' }}>{wf.label}</span>
+                    <span className="block text-[11px]" style={{ color: '#9d9da6' }}>{WORKFLOW_HINTS[wf.id]}</span>
+                  </span>
+                  {active && <Check size={13} className="mt-0.5" style={{ color: '#a5b4fc' }} />}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
     </div>
   )
 }
@@ -607,7 +712,7 @@ function EmptyState({
         <p className="text-sm font-semibold mb-1" style={{ color: '#e4e4e7' }}>
           {wf?.id === 'general' ? 'Free Chat' : `${wf?.label} Assistant`}
         </p>
-        <p className="text-xs leading-relaxed" style={{ color: '#52525b' }}>
+        <p className="text-xs leading-relaxed" style={{ color: '#8a8a93' }}>
           {wf?.id === 'general'
             ? 'No document mode — ask anything. Strategy, trade-offs, frameworks, tough decisions.'
             : `Your AI co-pilot for ${wf?.label.toLowerCase()} work. Try a starter below or type your own.`
@@ -663,7 +768,7 @@ export default function AIChatPanel() {
     documents, activeDocId, applyAIContent,
     addDocumentFile, setActiveDoc,
     activeFolderId, fileNodes,
-    pendingAICommand, clearPendingAICommand,
+    pendingAICommand, clearPendingAICommand, openTaskReview,
   } = useWorkspaceStore()
 
   const [workflow, setWorkflow] = useState<AIWorkflow>('prd')
@@ -674,6 +779,9 @@ export default function AIChatPanel() {
   const [streamingTargetTitle, setStreamingTargetTitle] = useState<string | null>(null)
   // messageId → applied doc info (title + before/after for diff)
   const [appliedDocs, setAppliedDocs] = useState<Record<string, AppliedDoc>>({})
+  // The last failed request in this panel, so it can be explained and retried
+  const [chatError, setChatError] = useState<{ error: AIError; text: string; workflow: AIWorkflow } | null>(null)
+  const slow = useSlowAI(isStreaming && !streamingContent)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef    = useRef<HTMLTextAreaElement>(null)
@@ -712,9 +820,10 @@ export default function AIChatPanel() {
     el.style.height = Math.min(el.scrollHeight, 140) + 'px'
   }, [input])
 
-  const handleSend = useCallback(async (overrideInput?: string) => {
+  const handleSend = useCallback(async (overrideInput?: string, { retry = false }: { retry?: boolean } = {}) => {
     const text = (overrideInput ?? input).trim()
     if (!text || isStreaming) return
+    setChatError(null)
 
     // ── Resolve which document to write to ──────────────────────────
     // Map workflow to its matching doc type. For analytical workflows
@@ -749,7 +858,11 @@ export default function AIChatPanel() {
     }
 
     // ── Build request ────────────────────────────────────────────────
-    const history = workflowMessages.map((m) => ({
+    // On a retry the user's message is already the last one in the conversation
+    const priorMessages = retry && workflowMessages.at(-1)?.role === 'user'
+      ? workflowMessages.slice(0, -1)
+      : workflowMessages
+    const history = priorMessages.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content,
     }))
@@ -774,7 +887,7 @@ export default function AIChatPanel() {
         : `${text}\n\n[OUTPUT RULES: Return ONLY clean markdown document content. Start directly with the first heading (e.g. # Title), no preamble or explanation.]`
       : text
 
-    addMessage({ role: 'user', content: text, workflow })
+    if (!retry) addMessage({ role: 'user', content: text, workflow })
     setInput('')
     setIsStreaming(true)
     setStreamingContent('')
@@ -783,49 +896,33 @@ export default function AIChatPanel() {
     abortRef.current = new AbortController()
 
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortRef.current.signal,
-        body: JSON.stringify({
-          workflow,
-          userMessage: finalMessage,
-          documentContext: docContext,
-          conversationHistory: history,
-        }),
-      })
-
-      if (!res.ok || !res.body) throw new Error('Stream failed')
-
-      const reader  = res.body.getReader()
-      const decoder = new TextDecoder()
-      let full = ''
-
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        full += chunk
-        setStreamingContent(full)
-      }
+      const full = await streamAI(
+        { workflow, userMessage: finalMessage, documentContext: docContext, conversationHistory: history },
+        { signal: abortRef.current.signal, onText: setStreamingContent },
+      )
 
       const msgId = addMessage({ role: 'assistant', content: full, workflow })
 
-      if (targetDocId && targetDocTitle) {
-        applyAIContent(targetDocId, markdownToHtml(full))
+      if (targetDocId && targetDocTitle && full.trim()) {
+        const before = targetDoc?.content ?? ''
+        // An empty document has nothing to lose, so write straight into it.
+        // Otherwise wait for the user to accept, insert or discard the change.
+        if (!hasExistingContent) applyAIContent(targetDocId, markdownToHtml(full))
         setAppliedDocs((prev) => ({
           ...prev,
-          [msgId]: { title: targetDocTitle!, before: targetDoc?.content ?? '', after: full },
+          [msgId]: {
+            docId: targetDocId!,
+            title: targetDocTitle!,
+            before,
+            after: full,
+            status: hasExistingContent ? 'pending' : 'applied',
+            restore: hasExistingContent ? undefined : before,
+          },
         }))
       }
     } catch (err: unknown) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        addMessage({
-          role: 'assistant',
-          content: 'Sorry, something went wrong. Please try again.',
-          workflow,
-        })
-      }
+      // Shown as a notice with the reason, not saved as an AI reply (so it isn't sent back as context)
+      if (!isAbort(err)) setChatError({ error: toAIError(err), text, workflow })
     } finally {
       setIsStreaming(false)
       setStreamingContent(null)
@@ -833,10 +930,44 @@ export default function AIChatPanel() {
     }
   }, [input, isStreaming, workflowMessages, useDocContext, documents, activeDocId, workflow, addMessage, addDocumentFile, setActiveDoc, applyAIContent, activeFolderId, fileNodes])
 
+  // Enter sends; Shift+Enter adds a new line
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
       handleSend()
+    }
+  }
+
+  // ── Accept / insert / discard / undo AI document edits ─────────────
+  const setProposalStatus = (msgId: string, status: AppliedDoc['status'], restore?: string) =>
+    setAppliedDocs((prev) => ({ ...prev, [msgId]: { ...prev[msgId], status, restore } }))
+
+  const proposalActions = (msgId: string, proposal: AppliedDoc): ProposalActions => {
+    const currentHtml = () => documents.find((d) => d.id === proposal.docId)?.content ?? ''
+    const docExists = documents.some((d) => d.id === proposal.docId)
+    return {
+      onAccept: () => {
+        if (!docExists) return
+        const restore = currentHtml()
+        applyAIContent(proposal.docId, markdownToHtml(proposal.after))
+        setActiveDoc(proposal.docId)
+        setProposalStatus(msgId, 'applied', restore)
+      },
+      onInsert: () => {
+        if (!docExists) return
+        const restore = currentHtml()
+        applyAIContent(proposal.docId, restore + markdownToHtml(proposal.after))
+        setActiveDoc(proposal.docId)
+        setProposalStatus(msgId, 'inserted', restore)
+      },
+      onDiscard: () => setProposalStatus(msgId, 'discarded'),
+      onUndo: () => {
+        if (docExists && proposal.restore !== undefined) applyAIContent(proposal.docId, proposal.restore)
+        setProposalStatus(msgId, 'pending')
+      },
+      onGenerateTasks: documents.find((d) => d.id === proposal.docId)?.type === 'prd'
+        ? () => openTaskReview(proposal.docId)
+        : undefined,
     }
   }
 
@@ -868,49 +999,12 @@ export default function AIChatPanel() {
   return (
     <div className="flex flex-col h-full" style={{ background: '#111113' }}>
 
-      {/* ── Workflow tabs ───────────────────────────────────────── */}
-      <div
-        className="flex-shrink-0 border-b overflow-x-auto scrollbar-hide"
-        style={{ borderColor: '#1e1e22', background: '#0d0d0f' }}
-      >
-        <div className="flex min-w-max items-stretch">
-          {WORKFLOWS.map((wf) => {
-            const active = workflow === wf.id
-            const isChat = wf.isGeneral
-            return (
-              <Fragment key={wf.id}>
-                {/* Separator before the Chat tab */}
-                {isChat && (
-                  <div
-                    className="flex-shrink-0 self-center mx-0.5"
-                    style={{ width: 1, height: 16, background: '#2a2a2a' }}
-                  />
-                )}
-                <button
-                  onClick={() => setWorkflow(wf.id)}
-                  className="flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium transition-colors relative whitespace-nowrap flex-shrink-0"
-                  style={{
-                    color: active
-                      ? (isChat ? '#34d399' : '#a5b4fc')
-                      : '#52525b',
-                  }}
-                  onMouseEnter={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.color = isChat ? '#6ee7b7' : '#71717a' }}
-                  onMouseLeave={(e) => { if (!active) (e.currentTarget as HTMLButtonElement).style.color = '#52525b' }}
-                  title={isChat ? 'Free chat — no document mode' : undefined}
-                >
-                  {isChat ? <MessageSquare size={12} /> : <span>{wf.emoji}</span>}
-                  <span>{wf.label}</span>
-                  {active && (
-                    <span
-                      className="absolute bottom-0 left-0 right-0 h-0.5"
-                      style={{ background: isChat ? '#10b981' : '#6366f1', borderRadius: '2px 2px 0 0' }}
-                    />
-                  )}
-                </button>
-              </Fragment>
-            )
-          })}
-        </div>
+      {/* ── AI mode ─────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: '#1e1e22', background: '#0d0d0f' }}>
+        <ModeMenu value={workflow} onChange={setWorkflow} />
+        <span className="text-[11px] truncate" style={{ color: '#8a8a93' }}>
+          {WORKFLOW_HINTS[workflow]}
+        </span>
       </div>
 
       {/* ── Messages area ───────────────────────────────────────── */}
@@ -924,6 +1018,7 @@ export default function AIChatPanel() {
                 key={msg.id}
                 msg={msg}
                 appliedDoc={appliedDocs[msg.id]}
+                actions={appliedDocs[msg.id] ? proposalActions(msg.id, appliedDocs[msg.id]) : undefined}
               />
             ))}
             {streamingMsg && (
@@ -958,6 +1053,18 @@ export default function AIChatPanel() {
                 </div>
               </div>
             )}
+            {slow && (
+              <div className="mb-4 ml-8"><SlowAINotice compact /></div>
+            )}
+            {chatError && chatError.workflow === workflow && !isStreaming && (
+              <div className="mb-4 ml-8">
+                <AIErrorNotice
+                  compact
+                  error={chatError.error}
+                  onRetry={() => handleSend(chatError.text, { retry: true })}
+                />
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </>
         )}
@@ -968,32 +1075,6 @@ export default function AIChatPanel() {
         className="flex-shrink-0 border-t px-3 pt-2.5 pb-3 space-y-2.5"
         style={{ borderColor: '#1e1e22', background: '#0d0d0f' }}
       >
-        {/* Free chat pill — shown when on a document workflow */}
-        {workflow !== 'general' && (
-          <button
-            onClick={() => setWorkflow('general')}
-            className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-medium transition-all"
-            style={{
-              background: 'rgba(16,185,129,0.06)',
-              border: '1px solid rgba(16,185,129,0.2)',
-              color: '#6ee7b7',
-            }}
-            onMouseEnter={(e) => {
-              const el = e.currentTarget as HTMLButtonElement
-              el.style.background = 'rgba(16,185,129,0.12)'
-              el.style.borderColor = 'rgba(16,185,129,0.4)'
-            }}
-            onMouseLeave={(e) => {
-              const el = e.currentTarget as HTMLButtonElement
-              el.style.background = 'rgba(16,185,129,0.06)'
-              el.style.borderColor = 'rgba(16,185,129,0.2)'
-            }}
-          >
-            <MessageSquare size={13} style={{ flexShrink: 0 }} />
-            <span>Switch to free chat</span>
-            <span className="ml-auto text-[10px] opacity-50">no document mode</span>
-          </button>
-        )}
 
         {/* Doc context toggle + Clear */}
         <div className="flex items-center justify-between">
@@ -1012,7 +1093,7 @@ export default function AIChatPanel() {
                 const d = documents.find(x => x.id === activeDocId)
                 return d ? (
                   <span
-                    className="truncate max-w-[100px] text-[10px] px-1.5 py-0.5 rounded"
+                    className="truncate max-w-[100px] text-[11px] px-1.5 py-0.5 rounded"
                     style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}
                     title={d.title}
                   >
@@ -1025,7 +1106,7 @@ export default function AIChatPanel() {
             /* In general mode: show a subtle indicator */
             <div className="flex items-center gap-2">
               <span
-                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium"
+                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] font-medium"
                 style={{ background: 'rgba(16,185,129,0.1)', color: '#34d399', border: '1px solid rgba(16,185,129,0.2)' }}
               >
                 <span
@@ -1041,9 +1122,9 @@ export default function AIChatPanel() {
             <button
               onClick={handleClear}
               className="flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors"
-              style={{ color: '#3f3f46' }}
+              style={{ color: '#7a7a83' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ef4444' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#3f3f46' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#7a7a83' }}
               title="Clear conversation"
             >
               <Trash2 size={12} />
@@ -1075,14 +1156,21 @@ export default function AIChatPanel() {
           />
 
           <div className="flex items-center justify-between">
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>
               <kbd
-                className="px-1 py-0.5 rounded text-[9px]"
-                style={{ background: '#27272a', border: '1px solid #3f3f46', color: '#52525b' }}
+                className="px-1 py-0.5 rounded text-[10px]"
+                style={{ background: '#27272a', border: '1px solid #3f3f46', color: '#8a8a93' }}
               >
-                ⌘↵
+                ↵
               </kbd>
-              {' '}to send
+              {' '}send ·{' '}
+              <kbd
+                className="px-1 py-0.5 rounded text-[10px]"
+                style={{ background: '#27272a', border: '1px solid #3f3f46', color: '#8a8a93' }}
+              >
+                ⇧↵
+              </kbd>
+              {' '}new line
             </span>
 
             <button

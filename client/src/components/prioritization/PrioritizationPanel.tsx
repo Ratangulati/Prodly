@@ -13,6 +13,8 @@ import {
   Sparkles, Check,
 } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
+import { AIError, streamAI, toAIError } from '@/lib/ai'
+import { AIErrorNotice, SlowAINotice, useSlowAI } from '@/components/ui/AIStatus'
 import { toast } from '@/lib/toast'
 import type { Feature, FeaturePriority, MoscowType } from '@/lib/types'
 
@@ -28,7 +30,7 @@ const MOSCOW_CFG: {
   { id: 'Must',   label: 'Must Have',   short: 'M', color: '#f87171', bg: 'rgba(239,68,68,0.07)',  ring: 'rgba(239,68,68,0.25)',  desc: 'Non-negotiable for launch'     },
   { id: 'Should', label: 'Should Have', short: 'S', color: '#fb923c', bg: 'rgba(249,115,22,0.07)', ring: 'rgba(249,115,22,0.25)', desc: 'High value, include if possible' },
   { id: 'Could',  label: 'Could Have',  short: 'C', color: '#818cf8', bg: 'rgba(99,102,241,0.07)', ring: 'rgba(99,102,241,0.25)', desc: 'Nice to have, defer if needed'   },
-  { id: 'Wont',   label: "Won't Have",  short: 'W', color: '#71717a', bg: 'rgba(113,113,122,0.07)',ring: 'rgba(113,113,122,0.25)', desc: 'Out of scope this cycle'         },
+  { id: 'Wont',   label: "Won't Have",  short: 'W', color: '#9d9da6', bg: 'rgba(113,113,122,0.07)',ring: 'rgba(113,113,122,0.25)', desc: 'Out of scope this cycle'         },
 ]
 
 /* ── Row tier coloring ───────────────────────────────────────────── */
@@ -130,7 +132,7 @@ function ReasoningPanel({ items, features, onApply, onClose }: {
           >
             <Check size={11} /> Apply all
           </button>
-          <button onClick={onClose} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: '#52525b' }}>
+          <button onClick={onClose} className="text-[11px] px-2 py-1 rounded-lg" style={{ color: '#8a8a93' }}>
             Dismiss
           </button>
         </div>
@@ -147,7 +149,7 @@ function ReasoningPanel({ items, features, onApply, onClose }: {
                 </span>
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {(['reach','impact','confidence','effort'] as const).map(k => (
-                    <span key={k} className="text-[9px] font-mono px-1 py-0.5 rounded" style={{ background: '#27272a', color: '#71717a' }}>
+                    <span key={k} className="text-[10px] font-mono px-1 py-0.5 rounded" style={{ background: '#27272a', color: '#9d9da6' }}>
                       {k[0].toUpperCase()}:{item[k]}
                     </span>
                   ))}
@@ -156,7 +158,7 @@ function ReasoningPanel({ items, features, onApply, onClose }: {
                   </span>
                 </div>
               </div>
-              <p className="text-[10px] leading-relaxed" style={{ color: '#52525b' }}>{item.reasoning}</p>
+              <p className="text-[11px] leading-relaxed" style={{ color: '#8a8a93' }}>{item.reasoning}</p>
             </div>
           )
         })}
@@ -173,8 +175,9 @@ function RICETable() {
   const { features, updateFeature } = useWorkspaceStore()
   const [sort, setSort]       = useState<{ col: SortCol; dir: SortDir }>({ col: 'riceScore', dir: 'desc' })
   const [aiState, setAiState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
+  const aiSlow = useSlowAI(aiState === 'loading')
   const [aiItems, setAiItems] = useState<AIReasoning[]>([])
-  const [aiError, setAiError] = useState('')
+  const [aiError, setAiError] = useState<AIError | null>(null)
   const [showReasoning, setShowReasoning] = useState(false)
 
   const allScores = useMemo(() => features.map(f => f.riceScore), [features])
@@ -197,7 +200,7 @@ function RICETable() {
   }
 
   const SortIcon = ({ col }: { col: SortCol }) => {
-    if (sort.col !== col) return <ArrowUpDown size={9} style={{ color: '#3f3f46' }} />
+    if (sort.col !== col) return <ArrowUpDown size={9} style={{ color: '#7a7a83' }} />
     return sort.dir === 'desc'
       ? <ArrowDown size={9} style={{ color: '#818cf8' }} />
       : <ArrowUp size={9} style={{ color: '#818cf8' }} />
@@ -206,7 +209,7 @@ function RICETable() {
   /* ── AI Scoring ─────────────────────────────────────────────── */
   const handleAIScore = useCallback(async () => {
     setAiState('loading')
-    setAiError('')
+    setAiError(null)
     const featureList = features.map(f =>
       `ID: ${f.id}\nTitle: ${f.title}\nDescription: ${f.description || 'No description'}\nCurrent status: ${f.status}`
     ).join('\n\n')
@@ -232,38 +235,22 @@ Features to score:
 ${featureList}`
 
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: 'prioritization',
-          userMessage: prompt,
-          conversationHistory: [],
-        }),
-      })
-      if (!res.body) throw new Error('No response body')
-
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let full = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        full += decoder.decode(value, { stream: true })
-      }
+      const full = await streamAI({ workflow: 'prioritization', userMessage: prompt })
 
       // Extract JSON — handle markdown code fences or raw JSON
       const jsonMatch = full.match(/```(?:json)?\s*([\s\S]*?)```/) || full.match(/(\{[\s\S]*\})/)
-      if (!jsonMatch) throw new Error('Could not parse AI response')
-      const parsed = JSON.parse(jsonMatch[1])
-      if (!parsed.features?.length) throw new Error('No features in response')
+      const unreadable = new AIError('failed', "The AI's answer wasn't in the expected format. Please try again.")
+      if (!jsonMatch) throw unreadable
+      let parsed: { features?: AIReasoning[] }
+      try { parsed = JSON.parse(jsonMatch[1]) } catch { throw unreadable }
+      if (!parsed.features?.length) throw unreadable
 
       setAiItems(parsed.features)
       setAiState('done')
       setShowReasoning(true)
       toast.info(`AI scored ${parsed.features.length} features`)
     } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'Unknown error')
+      setAiError(toAIError(err))
       setAiState('error')
     }
   }, [features])
@@ -285,7 +272,7 @@ ${featureList}`
   /* ── Header cell ────────────────────────────────────────────── */
   const TH = ({ col, label, title }: { col: SortCol; label: string; title?: string }) => (
     <th
-      className="text-[10px] font-semibold uppercase tracking-wider cursor-pointer select-none px-1 py-2"
+      className="text-[11px] font-semibold uppercase tracking-wider cursor-pointer select-none px-1 py-2"
       style={{ color: sort.col === col ? '#818cf8' : '#52525b', whiteSpace: 'nowrap' }}
       onClick={() => toggleSort(col)}
       title={title}
@@ -303,7 +290,7 @@ ${featureList}`
       <div className="flex-shrink-0 flex items-center justify-between px-3 py-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold" style={{ color: '#e4e4e7' }}>RICE Scores</span>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: '#27272a', color: '#52525b' }}>
+          <span className="text-[11px] px-1.5 py-0.5 rounded-full" style={{ background: '#27272a', color: '#8a8a93' }}>
             {features.length}
           </span>
         </div>
@@ -322,9 +309,10 @@ ${featureList}`
         </button>
       </div>
 
-      {aiState === 'error' && (
-        <div className="mx-3 mb-2 px-2.5 py-2 rounded-lg text-[11px]" style={{ background: 'rgba(239,68,68,0.1)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-          {aiError}
+      {aiSlow && <div className="mx-3 mb-2"><SlowAINotice compact /></div>}
+      {aiState === 'error' && aiError && (
+        <div className="mx-3 mb-2">
+          <AIErrorNotice compact error={aiError} onRetry={handleAIScore} />
         </div>
       )}
 
@@ -333,7 +321,7 @@ ${featureList}`
         {(['high','mid','low'] as const).map(t => (
           <div key={t} className="flex items-center gap-1">
             <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: TIER_STYLE[t].bar }} />
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>
               {t === 'high' ? 'Top 25%' : t === 'mid' ? 'Mid 50%' : 'Bottom 25%'}
             </span>
           </div>
@@ -360,7 +348,7 @@ ${featureList}`
               <TH col="confidence" label="C"          title="Confidence (%)" />
               <TH col="effort"     label="E"          title="Effort (person-weeks)" />
               <TH col="riceScore"  label="Score"      title="RICE = (R×I×C%) / E" />
-              <th className="text-[10px] font-semibold uppercase tracking-wider px-1 py-2 text-center" style={{ color: '#52525b' }}>P</th>
+              <th className="text-[11px] font-semibold uppercase tracking-wider px-1 py-2 text-center" style={{ color: '#8a8a93' }}>P</th>
             </tr>
           </thead>
           <tbody>
@@ -435,7 +423,7 @@ ${featureList}`
                     <select
                       value={f.priority}
                       onChange={(e) => updateFeature(f.id, { priority: e.target.value as FeaturePriority })}
-                      className="text-[10px] font-bold rounded outline-none cursor-pointer w-full text-center"
+                      className="text-[11px] font-bold rounded outline-none cursor-pointer w-full text-center"
                       style={{
                         background: 'transparent', border: 'none',
                         color: PRIORITY_COLOR[f.priority],
@@ -453,7 +441,7 @@ ${featureList}`
         </table>
 
         {features.length === 0 && (
-          <div className="flex items-center justify-center h-24 text-xs" style={{ color: '#555' }}>
+          <div className="flex items-center justify-center h-24 text-xs" style={{ color: '#8a8a93' }}>
             No features yet — add some in the <strong style={{ color: '#818cf8' }}>Roadmap</strong> tab
           </div>
         )}
@@ -480,8 +468,8 @@ ${featureList}`
           { k: 'C', v: 'Confidence%' },
           { k: 'E', v: 'Effort wks' },
         ].map(({ k, v }) => (
-          <span key={k} className="text-[9px]" style={{ color: '#27272a' }} title={v}>
-            <span style={{ color: '#3f3f46' }}>{k}</span>=<span>{v}</span>
+          <span key={k} className="text-[10px]" style={{ color: '#27272a' }} title={v}>
+            <span style={{ color: '#7a7a83' }}>{k}</span>=<span>{v}</span>
           </span>
         ))}
       </div>
@@ -513,7 +501,7 @@ function MosCowChip({ feature, isDragOverlay }: { feature: Feature; isDragOverla
       <span className="text-[11px] font-medium truncate flex-1" style={{ background: '#18181b', borderColor: '#27272a', color: '#d4d4d8' }}>
         {feature.title}
       </span>
-      <span className="text-[9px] font-bold flex-shrink-0" style={{ color: PRIORITY_COLOR[feature.priority] }}>
+      <span className="text-[10px] font-bold flex-shrink-0" style={{ color: PRIORITY_COLOR[feature.priority] }}>
         {feature.priority}
       </span>
     </div>
@@ -546,7 +534,7 @@ function MosCowQuadrant({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <span
-              className="text-[9px] font-black px-1.5 py-0.5 rounded"
+              className="text-[10px] font-black px-1.5 py-0.5 rounded"
               style={{ background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.ring}` }}
             >
               {cfg.short}
@@ -554,16 +542,16 @@ function MosCowQuadrant({
             <span className="text-[11px] font-semibold" style={{ color: cfg.color }}>{cfg.label}</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] font-bold" style={{ color: cfg.color }}>{features.length}</span>
+            <span className="text-[11px] font-bold" style={{ color: cfg.color }}>{features.length}</span>
             <span
-              className="text-[9px] px-1 py-0.5 rounded font-medium"
-              style={{ background: '#27272a', color: '#52525b' }}
+              className="text-[10px] px-1 py-0.5 rounded font-medium"
+              style={{ background: '#27272a', color: '#8a8a93' }}
             >
               {pct}%
             </span>
           </div>
         </div>
-        <p className="text-[9px] mt-0.5" style={{ color: '#3f3f46' }}>{cfg.desc}</p>
+        <p className="text-[10px] mt-0.5" style={{ color: '#7a7a83' }}>{cfg.desc}</p>
       </div>
 
       {/* Feature chips */}
@@ -573,7 +561,7 @@ function MosCowQuadrant({
         ))}
         {features.length === 0 && (
           <div
-            className="flex items-center justify-center h-10 rounded-lg border border-dashed text-[10px]"
+            className="flex items-center justify-center h-10 rounded-lg border border-dashed text-[11px]"
             style={{ borderColor: '#27272a', color: '#2e2e32' }}
           >
             Drop here
@@ -636,8 +624,8 @@ function MoSCoWView() {
         {/* Scope scope bar */}
         <div className="flex-shrink-0 px-3 py-2">
           <div className="flex items-center gap-1.5 mb-1.5">
-            <span className="text-[10px] font-medium uppercase tracking-wider" style={{ color: '#52525b' }}>Scope</span>
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>— {features.length} features</span>
+            <span className="text-[11px] font-medium uppercase tracking-wider" style={{ color: '#8a8a93' }}>Scope</span>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>— {features.length} features</span>
           </div>
           <div className="flex h-2 rounded-full overflow-hidden gap-px">
             {scopeSummary.map(q => (
@@ -650,9 +638,9 @@ function MoSCoWView() {
           </div>
           <div className="flex items-center gap-3 mt-1.5">
             {scopeSummary.map(q => q.count > 0 && (
-              <span key={q.id} className="flex items-center gap-1 text-[9px]">
+              <span key={q.id} className="flex items-center gap-1 text-[10px]">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: q.color }} />
-                <span style={{ color: '#52525b' }}>{q.short} {q.pct}%</span>
+                <span style={{ color: '#8a8a93' }}>{q.short} {q.pct}%</span>
               </span>
             ))}
           </div>
@@ -710,9 +698,9 @@ export default function PrioritizationPanel() {
           )
         })}
 
-        <div className="ml-auto flex items-center gap-1" style={{ color: '#3f3f46' }}>
+        <div className="ml-auto flex items-center gap-1" style={{ color: '#7a7a83' }}>
           <Info size={11} />
-          <span className="text-[10px]">Click cells to edit</span>
+          <span className="text-[11px]">Click cells to edit</span>
         </div>
       </div>
 

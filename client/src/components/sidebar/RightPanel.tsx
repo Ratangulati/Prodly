@@ -35,7 +35,7 @@ function TabPlaceholder({ tab }: { tab: TabId }) {
     <div className="flex flex-col items-center justify-center flex-1 px-6 text-center gap-3 py-16">
       <div className="text-3xl">{d.icon}</div>
       <p className="text-sm font-semibold" style={{ color: '#ddd' }}>{d.title}</p>
-      <p className="text-xs leading-relaxed" style={{ color: '#666' }}>{d.body}</p>
+      <p className="text-xs leading-relaxed" style={{ color: '#9d9da6' }}>{d.body}</p>
       <div
         className="mt-2 px-3 py-1.5 rounded-md text-xs font-medium"
         style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}
@@ -64,7 +64,7 @@ export default function RightPanel() {
         <button
           onClick={() => setCollapsed(false)}
           className="p-1.5 rounded transition-colors hover:bg-white/5"
-          style={{ color: '#555' }}
+          style={{ color: '#8a8a93' }}
           title="Expand panel"
         >
           <PanelRightOpen size={15} />
@@ -119,7 +119,7 @@ export default function RightPanel() {
         <button
           onClick={() => setCollapsed(true)}
           className="ml-auto mr-2 p-1.5 rounded transition-colors hover:bg-white/5"
-          style={{ color: '#555' }}
+          style={{ color: '#8a8a93' }}
           title="Collapse panel"
         >
           <PanelRightClose size={14} />
