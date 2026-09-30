@@ -1,13 +1,41 @@
+import { pathToFileURL } from 'node:url'
 import { PrismaClient } from '@prisma/client'
+import { hashPassword } from '../src/lib/auth.js'
 
-const prisma = new PrismaClient()
+// Everything below is seeded into the demo workspace
+const WORKSPACE_ID = 'ws-demo'
+const DEMO_EMAIL = 'demo@prodly.dev'
+const DEMO_PASSWORD = 'prodly-demo'
+
+const WORKSPACE_MODELS = new Set(['Document', 'Feature', 'AIMessage', 'ResearchInsight', 'FileNode', 'Member', 'Task'])
+const withWorkspace = <T extends object>(data: T) => ({ ...data, workspaceId: WORKSPACE_ID })
+
+// Adds workspaceId to every create, so the demo data below stays readable
+const withWorkspaceIds = (client: PrismaClient) => client.$extends({
+  query: {
+    $allModels: {
+      async create({ model, args, query }) {
+        if (WORKSPACE_MODELS.has(model)) args.data = withWorkspace(args.data)
+        return query(args)
+      },
+      async createMany({ model, args, query }) {
+        if (WORKSPACE_MODELS.has(model)) {
+          args.data = Array.isArray(args.data) ? args.data.map(withWorkspace) : withWorkspace(args.data)
+        }
+        return query(args)
+      },
+    },
+  },
+})
+
+let prisma: ReturnType<typeof withWorkspaceIds>
 
 const now = new Date()
 
-async function main() {
+async function seedWorkspace() {
   // Skip if already seeded
-  const existing = await prisma.document.count()
-  if (existing > 0) { console.log('✓ Already seeded — skipping'); return }
+  const existing = await prisma.document.count({ where: { workspaceId: WORKSPACE_ID } })
+  if (existing > 0) { console.log('✓ Workspace already seeded — skipping'); return }
 
   // ── Documents ──────────────────────────────────────────────────────
   const doc1 = await prisma.document.create({
@@ -288,9 +316,83 @@ Scenario: Progress persists on refresh
     ],
   })
 
-  console.log('✓ Seed complete')
+  console.log('✓ Workspace seeded')
 }
 
-main()
-  .catch((e) => { console.error(e); process.exit(1) })
-  .finally(() => prisma.$disconnect())
+// Seeded separately so existing workspaces also get a demo team and task board
+async function seedTeam() {
+  const existing = await prisma.member.count({ where: { workspaceId: WORKSPACE_ID, userId: null } })
+  if (existing > 0) { console.log('✓ Team already seeded — skipping'); return }
+
+  await prisma.member.createMany({
+    data: [
+      { id: 'member-alice', name: 'Alice', color: '#6366f1' },
+      { id: 'member-bob',   name: 'Bob',   color: '#22c55e' },
+      { id: 'member-carol', name: 'Carol', color: '#f59e0b' },
+      { id: 'member-dave',  name: 'Dave',  color: '#ec4899' },
+      { id: 'member-eve',   name: 'Eve',   color: '#06b6d4' },
+    ],
+  })
+
+  // Only link tasks to the demo PRD when it exists
+  const prd = await prisma.document.findUnique({ where: { id: 'doc-1' } })
+  const sourceDocId = prd ? 'doc-1' : null
+
+  await prisma.task.createMany({
+    data: [
+      { id: 'task-1', title: 'Add role picker to sign-up form', description: 'Ask new users for their role (PM, Engineer, Designer, Other) during sign-up and store it on the profile.', status: 'done', priority: 'P0', assigneeId: 'member-bob', estimate: 'S', sourceDocId, order: 0 },
+      { id: 'task-2', title: 'Generate checklist from role and goals', description: 'Build the service that returns an ordered onboarding checklist for the detected role. Done when each role gets a distinct list.', status: 'in-progress', priority: 'P0', assigneeId: 'member-alice', dueDate: '2026-10-10', estimate: 'M', sourceDocId, order: 0 },
+      { id: 'task-3', title: 'Persist checklist progress across sessions', description: 'Save completed steps so returning users resume where they left off.', status: 'todo', priority: 'P1', assigneeId: 'member-dave', dueDate: '2026-10-17', estimate: 'M', sourceDocId, order: 0 },
+      { id: 'task-4', title: 'Design checklist sidebar widget', description: 'Figma designs for the collapsed and expanded checklist states, including empty and completed states.', status: 'review', priority: 'P1', assigneeId: 'member-carol', estimate: 'S', sourceDocId, order: 0 },
+      { id: 'task-5', title: 'Track activation funnel events', description: 'Instrument checklist_viewed, step_completed and checklist_completed so we can measure the activation goal.', status: 'todo', priority: 'P2', assigneeId: 'member-eve', estimate: 'S', sourceDocId, order: 1 },
+    ],
+  })
+
+  console.log('✓ Team and tasks seeded')
+}
+
+async function ensureWorkspace() {
+  await prisma.workspace.upsert({
+    where: { id: WORKSPACE_ID },
+    create: { id: WORKSPACE_ID, name: 'Demo workspace', joinCode: 'DEMO-PRODLY' },
+    update: {},
+  })
+}
+
+// A ready-made login for trying the app locally
+async function seedDemoUser() {
+  if (await prisma.user.findUnique({ where: { email: DEMO_EMAIL } })) {
+    console.log('✓ Demo user already exists — skipping')
+    return
+  }
+  await prisma.user.create({
+    data: {
+      email: DEMO_EMAIL,
+      name: 'Demo PM',
+      passwordHash: await hashPassword(DEMO_PASSWORD),
+      workspaceId: WORKSPACE_ID,
+      member: { create: { name: 'Demo PM', color: '#8b5cf6', workspaceId: WORKSPACE_ID } },
+    },
+  })
+  console.log(`✓ Demo user seeded (${DEMO_EMAIL} / ${DEMO_PASSWORD})`)
+}
+
+/** Seeds the demo workspace, team, tasks and login. Safe to run repeatedly. */
+export async function seedDemo(client: PrismaClient) {
+  prisma = withWorkspaceIds(client)
+  await ensureWorkspace()
+  await seedWorkspace()
+  await seedTeam()
+  await seedDemoUser()
+}
+
+// Run directly with `tsx prisma/seed.ts`; the tests import seedDemo instead
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const client = new PrismaClient()
+  // A login with a published password must never appear on a real deployment by accident
+  const skip = process.env.NODE_ENV === 'production' && process.env.SEED_DEMO !== 'true'
+  if (skip) console.log('✓ Production: skipping demo data (set SEED_DEMO=true to include it)')
+  ;(skip ? Promise.resolve() : seedDemo(client))
+    .catch((e) => { console.error(e); process.exit(1) })
+    .finally(() => client.$disconnect())
+}

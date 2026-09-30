@@ -1,24 +1,33 @@
 generator client {
   provider = "prisma-client-js"
+  // Local machine plus Vercel Functions (Linux, x64 and arm64)
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Pooled connection for the app; direct connection for migrations (Neon via Vercel)
+  url       = env("POSTGRES_PRISMA_URL")
+  directUrl = env("DATABASE_URL_UNPOOLED")
 }
 
 model Document {
-  id        String   @id @default(uuid())
-  title     String
-  content   String
-  type      String
-  tags      String   @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String            @id @default(uuid())
+  title           String
+  content         String
+  type            String
+  tags            String            @default("[]")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  workspaceId     String
+  workspace       Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  DocumentVersion DocumentVersion[]
+
+  @@index([workspaceId])
 }
 
 model Feature {
-  id          String  @id @default(uuid())
+  id          String    @id @default(uuid())
   title       String
   description String
   status      String
@@ -29,33 +38,203 @@ model Feature {
   effort      Float
   riceScore   Float
   moscow      String
-  assignee    String  @default("")
-  dueDate     String  @default("")
+  assignee    String    @default("")
+  dueDate     String    @default("")
   linkedDocId String?
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model AIMessage {
-  id        String   @id @default(uuid())
-  role      String
-  content   String
-  workflow  String
-  timestamp DateTime @default(now())
+  id          String    @id @default(uuid())
+  role        String
+  content     String
+  workflow    String
+  timestamp   DateTime  @default(now())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model ResearchInsight {
-  id             String @id @default(uuid())
+  id             String    @id @default(uuid())
   theme          String
   summary        String
-  quotes         String @default("[]")
+  quotes         String    @default("[]")
   frequency      Int
-  linkedFeatures String @default("[]")
+  linkedFeatures String    @default("[]")
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
 }
 
 model FileNode {
-  id        String   @id
+  id          String    @id
+  name        String
+  type        String
+  parentId    String?
+  children    String    @default("[]")
+  createdAt   DateTime  @default(now())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Member {
+  id          String    @id @default(uuid())
+  name        String
+  color       String    @default("#6366f1")
+  createdAt   DateTime  @default(now())
+  /// Set when this teammate has a login
+  userId      String?   @unique
+  user        User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Task {
+  id          String    @id @default(uuid())
+  title       String
+  description String    @default("")
+  status      String    @default("todo")
+  priority    String    @default("P2")
+  assigneeId  String?
+  dueDate     String    @default("")
+  estimate    String    @default("")
+  sourceDocId String?
+  order       Float     @default(0)
+  sprintId    String?
+  sprint      Sprint?   @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  /// Link to the issue this task was exported to (e.g. GitHub)
+  externalUrl String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
   name      String
-  type      String
-  parentId  String?
-  children  String   @default("[]")
+  /// Shared with teammates so they can join this workspace
+  joinCode  String   @unique
   createdAt DateTime @default(now())
+
+  users            User[]
+  documents        Document[]
+  documentVersions DocumentVersion[]
+  features         Feature[]
+  messages         AIMessage[]
+  researchInsights ResearchInsight[]
+  fileNodes        FileNode[]
+  members          Member[]
+  tasks            Task[]
+  Comment          Comment[]
+  sprints          Sprint[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  member           Member?
+  sessions         Session[]
+  aiUsage          AiUsage[]
+  documentVersions DocumentVersion[]
+  comments         Comment[]
+}
+
+model Session {
+  /// SHA-256 of the session token; the raw token only lives in the user's cookie
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// AI requests per user per day, for the daily usage limit
+model AiUsage {
+  id     String @id @default(uuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  day    String
+  count  Int    @default(0)
+
+  @@unique([userId, day])
+}
+
+/// A saved copy of a document, taken before it changes
+model DocumentVersion {
+  id         String   @id @default(uuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  title      String
+  content    String
+  /// "edit" (periodic while typing), "ai" (before an AI change) or "restore" (before restoring an older version)
+  reason     String
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt  DateTime @default(now())
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+  @@index([workspaceId])
+}
+
+/// A comment on a task or document
+model Comment {
+  id         String   @id @default(uuid())
+  /// "task" or "document"
+  targetType String
+  targetId   String
+  body       String
+  /// JSON array of mentioned Member ids
+  mentions   String   @default("[]")
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, targetType, targetId])
+}
+
+model Sprint {
+  id        String   @id @default(uuid())
+  name      String
+  goal      String   @default("")
+  /// YYYY-MM-DD
+  startDate String
+  endDate   String
+  /// "active" or "completed"; a workspace has at most one active sprint
+  status    String   @default("active")
+  createdAt DateTime @default(now())
+  tasks     Task[]
+
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status])
 }
