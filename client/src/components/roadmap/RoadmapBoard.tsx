@@ -10,11 +10,13 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   Plus, Calendar, TrendingUp, GripVertical,
   LayoutGrid, AlignLeft, ChevronDown, Filter,
-  Trash2, User,
+  Trash2, User, FlaskConical,
 } from 'lucide-react'
 import { format, parseISO, isValid, getQuarter, getYear } from 'date-fns'
+import FeatureEditModal from './FeatureEditModal'
 import { useWorkspaceStore } from '@/lib/store'
 import { toast } from '@/lib/toast'
+import { featureEvidence } from '@/lib/evidence'
 import type { Feature, FeatureStatus, FeaturePriority } from '@/lib/types'
 
 /* ── Constants ───────────────────────────────────────────────────── */
@@ -73,7 +75,7 @@ function Avatar({ name, size = 22 }: { name: string; size?: number }) {
         className="flex items-center justify-center rounded-full flex-shrink-0"
         style={{ width: size, height: size, background: '#27272a', border: '1px solid #3f3f46' }}
       >
-        <User size={size * 0.5} style={{ color: '#52525b' }} />
+        <User size={size * 0.5} style={{ color: '#8a8a93' }} />
       </div>
     )
   }
@@ -96,7 +98,7 @@ function PriorityBadge({ p }: { p: FeaturePriority }) {
   const cfg = PRIORITY[p]
   return (
     <span
-      className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+      className="text-[11px] font-bold px-1.5 py-0.5 rounded"
       style={{ background: cfg.bg, color: cfg.text, border: `1px solid ${cfg.ring}` }}
     >
       {p}
@@ -109,9 +111,10 @@ interface CardProps {
   feature: Feature
   isDragOverlay?: boolean
   onDelete?: (id: string) => void
+  onEdit?: (id: string) => void
 }
 
-function FeatureCard({ feature, isDragOverlay, onDelete }: CardProps) {
+function FeatureCard({ feature, isDragOverlay, onDelete, onEdit }: CardProps) {
   const {
     attributes, listeners, setNodeRef,
     transform, isDragging,
@@ -122,6 +125,8 @@ function FeatureCard({ feature, isDragOverlay, onDelete }: CardProps) {
     : undefined
 
   const dateStr = fmtDate(feature.dueDate)
+  const insights = useWorkspaceStore((s) => s.insights)
+  const evidence = featureEvidence(feature.id, insights)
 
   return (
     <div
@@ -142,11 +147,13 @@ function FeatureCard({ feature, isDragOverlay, onDelete }: CardProps) {
       }}
       {...attributes}
       {...listeners}
+      onClick={() => onEdit?.(feature.id)}
+      title={onEdit ? 'Click to edit' : undefined}
     >
       {/* Top row */}
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-start gap-1.5 min-w-0">
-          <GripVertical size={13} className="flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#3f3f46' }} />
+          <GripVertical size={13} className="flex-shrink-0 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity" style={{ color: '#7a7a83' }} />
           <p className="text-xs font-medium leading-snug" style={{ color: '#e4e4e7' }}>{feature.title}</p>
         </div>
         <PriorityBadge p={feature.priority} />
@@ -157,17 +164,28 @@ function FeatureCard({ feature, isDragOverlay, onDelete }: CardProps) {
         <div className="flex items-center gap-2">
           {/* RICE score */}
           <div className="flex items-center gap-1" title="RICE score">
-            <TrendingUp size={10} style={{ color: '#52525b' }} />
-            <span className="text-[10px] font-mono font-semibold" style={{ color: '#71717a' }}>
+            <TrendingUp size={10} style={{ color: '#8a8a93' }} />
+            <span className="text-[11px] font-mono font-semibold" style={{ color: '#9d9da6' }}>
               {feature.riceScore.toLocaleString()}
             </span>
           </div>
 
+          {/* Research evidence */}
+          {evidence.insights.length > 0 && (
+            <div
+              className="flex items-center gap-1"
+              title={`Backed by ${evidence.insights.length} research insight${evidence.insights.length === 1 ? '' : 's'} (${evidence.mentions} user mentions)`}
+            >
+              <FlaskConical size={10} style={{ color: '#fbbf24' }} />
+              <span className="text-[11px]" style={{ color: '#fcd34d' }}>{evidence.mentions}</span>
+            </div>
+          )}
+
           {/* Due date */}
           {dateStr && (
             <div className="flex items-center gap-1">
-              <Calendar size={10} style={{ color: '#52525b' }} />
-              <span className="text-[10px]" style={{ color: '#71717a' }}>{dateStr}</span>
+              <Calendar size={10} style={{ color: '#8a8a93' }} />
+              <span className="text-[11px]" style={{ color: '#9d9da6' }}>{dateStr}</span>
             </div>
           )}
         </div>
@@ -178,9 +196,9 @@ function FeatureCard({ feature, isDragOverlay, onDelete }: CardProps) {
               onPointerDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onDelete(feature.id) }}
               className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded"
-              style={{ color: '#3f3f46' }}
+              style={{ color: '#7a7a83' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ef4444' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#3f3f46' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#7a7a83' }}
             >
               <Trash2 size={11} />
             </button>
@@ -240,7 +258,7 @@ function AddFeatureForm({ status, onClose }: AddFormProps) {
       <div className="grid grid-cols-2 gap-2 mb-2.5">
         {/* Priority */}
         <div>
-          <label className="block text-[10px] mb-1" style={{ color: '#52525b' }}>Priority</label>
+          <label className="block text-[11px] mb-1" style={{ color: '#8a8a93' }}>Priority</label>
           <select
             value={form.priority}
             onChange={(e) => setForm({ ...form, priority: e.target.value as FeaturePriority })}
@@ -257,7 +275,7 @@ function AddFeatureForm({ status, onClose }: AddFormProps) {
 
         {/* Assignee */}
         <div>
-          <label className="block text-[10px] mb-1" style={{ color: '#52525b' }}>Assignee</label>
+          <label className="block text-[11px] mb-1" style={{ color: '#8a8a93' }}>Assignee</label>
           <input
             value={form.assignee}
             onChange={(e) => setForm({ ...form, assignee: e.target.value })}
@@ -270,7 +288,7 @@ function AddFeatureForm({ status, onClose }: AddFormProps) {
 
       {/* Due date */}
       <div className="mb-3">
-        <label className="block text-[10px] mb-1" style={{ color: '#52525b' }}>Due date</label>
+        <label className="block text-[11px] mb-1" style={{ color: '#8a8a93' }}>Due date</label>
         <input
           type="date"
           value={form.dueDate}
@@ -307,9 +325,10 @@ interface ColumnProps {
   col: typeof COLUMNS[number]
   features: Feature[]
   onDelete: (id: string) => void
+  onEdit: (id: string) => void
 }
 
-function DroppableColumn({ col, features, onDelete }: ColumnProps) {
+function DroppableColumn({ col, features, onDelete, onEdit }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: col.id })
   const [adding, setAdding] = useState(false)
 
@@ -334,24 +353,24 @@ function DroppableColumn({ col, features, onDelete }: ColumnProps) {
           <span className="text-sm">{col.emoji}</span>
           <span className="text-xs font-semibold" style={{ color: '#e4e4e7' }}>{col.label}</span>
           <span
-            className="text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-            style={{ background: '#27272a', color: '#52525b' }}
+            className="text-[11px] font-bold px-1.5 py-0.5 rounded-full"
+            style={{ background: '#27272a', color: '#8a8a93' }}
           >
             {features.length}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
           {totalRice > 0 && (
-            <span className="text-[9px] font-mono" style={{ color: col.accent }} title="Total RICE">
+            <span className="text-[10px] font-mono" style={{ color: col.accent }} title="Total RICE">
               {totalRice.toLocaleString()}
             </span>
           )}
           <button
             onClick={() => setAdding(true)}
             className="p-1 rounded transition-colors"
-            style={{ color: '#3f3f46' }}
+            style={{ color: '#7a7a83' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = col.accent }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#3f3f46' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#7a7a83' }}
             title={`Add to ${col.label}`}
           >
             <Plus size={13} />
@@ -369,12 +388,12 @@ function DroppableColumn({ col, features, onDelete }: ColumnProps) {
           <AddFeatureForm status={col.id} onClose={() => setAdding(false)} />
         )}
         {features.map((f) => (
-          <FeatureCard key={f.id} feature={f} onDelete={onDelete} />
+          <FeatureCard key={f.id} feature={f} onDelete={onDelete} onEdit={onEdit} />
         ))}
         {features.length === 0 && !adding && (
           <div
             className="flex items-center justify-center h-16 rounded-lg border border-dashed text-[11px]"
-            style={{ borderColor: '#27272a', color: '#3f3f46' }}
+            style={{ borderColor: '#27272a', color: '#7a7a83' }}
           >
             Drop here
           </div>
@@ -426,7 +445,7 @@ function FilterBar({ filters, assignees, onChange }: FilterBarProps) {
         >
           {/* Priority chips */}
           <div>
-            <p className="text-[10px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#52525b' }}>Priority</p>
+            <p className="text-[11px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#8a8a93' }}>Priority</p>
             <div className="flex gap-1.5 flex-wrap">
               {(['P0','P1','P2','P3'] as FeaturePriority[]).map((p) => {
                 const on = filters.priorities.includes(p)
@@ -440,7 +459,7 @@ function FilterBar({ filters, assignees, onChange }: FilterBarProps) {
                         : [...filters.priorities, p]
                       onChange({ ...filters, priorities: next.length ? next : ['P0','P1','P2','P3'] })
                     }}
-                    className="px-2 py-0.5 rounded text-[10px] font-bold transition-all"
+                    className="px-2 py-0.5 rounded text-[11px] font-bold transition-all"
                     style={{
                       background: on ? cfg.bg : '#27272a',
                       color: on ? cfg.text : '#52525b',
@@ -457,7 +476,7 @@ function FilterBar({ filters, assignees, onChange }: FilterBarProps) {
           {/* Assignee */}
           {assignees.length > 0 && (
             <div>
-              <p className="text-[10px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#52525b' }}>Assignee</p>
+              <p className="text-[11px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#8a8a93' }}>Assignee</p>
               <select
                 value={filters.assignee}
                 onChange={(e) => onChange({ ...filters, assignee: e.target.value })}
@@ -474,20 +493,20 @@ function FilterBar({ filters, assignees, onChange }: FilterBarProps) {
 
           {/* Date range */}
           <div>
-            <p className="text-[10px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#52525b' }}>Due date range</p>
+            <p className="text-[11px] mb-1.5 font-medium uppercase tracking-wider" style={{ color: '#8a8a93' }}>Due date range</p>
             <div className="flex gap-2">
               <input
                 type="date"
                 value={filters.dateFrom}
                 onChange={(e) => onChange({ ...filters, dateFrom: e.target.value })}
-                className="flex-1 text-[10px] rounded-lg px-2 py-1.5 outline-none"
+                className="flex-1 text-[11px] rounded-lg px-2 py-1.5 outline-none"
                 style={{ background: '#27272a', color: '#e4e4e7', border: '1px solid #3f3f46', colorScheme: 'dark' }}
               />
               <input
                 type="date"
                 value={filters.dateTo}
                 onChange={(e) => onChange({ ...filters, dateTo: e.target.value })}
-                className="flex-1 text-[10px] rounded-lg px-2 py-1.5 outline-none"
+                className="flex-1 text-[11px] rounded-lg px-2 py-1.5 outline-none"
                 style={{ background: '#27272a', color: '#e4e4e7', border: '1px solid #3f3f46', colorScheme: 'dark' }}
               />
             </div>
@@ -496,10 +515,10 @@ function FilterBar({ filters, assignees, onChange }: FilterBarProps) {
           {/* Reset */}
           <button
             onClick={() => onChange({ priorities: ['P0','P1','P2','P3'], assignee: '', dateFrom: '', dateTo: '' })}
-            className="text-[10px] transition-colors"
-            style={{ color: '#52525b' }}
+            className="text-[11px] transition-colors"
+            style={{ color: '#8a8a93' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#a1a1aa' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#52525b' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#8a8a93' }}
           >
             Reset filters
           </button>
@@ -533,10 +552,10 @@ function TimelineView({ features }: { features: Feature[] }) {
       <div className="flex flex-col items-center justify-center h-full gap-3 py-16 px-6 text-center">
         <div className="text-3xl">🗺</div>
         <p className="text-sm font-semibold" style={{ color: '#ddd' }}>No features yet</p>
-        <p className="text-xs leading-relaxed" style={{ color: '#555' }}>
+        <p className="text-xs leading-relaxed" style={{ color: '#8a8a93' }}>
           Add features to any column to start building your roadmap.
         </p>
-        <p className="text-[10px]" style={{ color: '#444' }}>
+        <p className="text-[11px]" style={{ color: '#7a7a83' }}>
           Click the <strong style={{ color: '#6366f1' }}>+</strong> button in any column to add your first feature.
         </p>
       </div>
@@ -562,7 +581,7 @@ function TimelineView({ features }: { features: Feature[] }) {
                   <span className="text-xs font-semibold" style={{ color: qtr === 'Unscheduled' ? '#52525b' : '#e4e4e7' }}>
                     {qtr}
                   </span>
-                  <span className="text-[10px]" style={{ color: '#52525b' }}>
+                  <span className="text-[11px]" style={{ color: '#8a8a93' }}>
                     {qFeatures.length} feature{qFeatures.length !== 1 ? 's' : ''}
                   </span>
                 </div>
@@ -573,7 +592,7 @@ function TimelineView({ features }: { features: Feature[] }) {
                     style={{ width: `${pct}%`, background: '#22c55e' }}
                   />
                 </div>
-                <p className="text-[9px] mt-1" style={{ color: '#52525b' }}>{pct}% done</p>
+                <p className="text-[10px] mt-1" style={{ color: '#8a8a93' }}>{pct}% done</p>
               </div>
 
               {/* Features */}
@@ -592,20 +611,20 @@ function TimelineView({ features }: { features: Feature[] }) {
                         className="flex items-start gap-1.5 rounded-lg px-2 py-1.5"
                         style={{ background: '#18181b', border: '1px solid #27272a' }}
                       >
-                        <span className="text-[9px] mt-0.5 flex-shrink-0">{col.emoji}</span>
+                        <span className="text-[10px] mt-0.5 flex-shrink-0">{col.emoji}</span>
                         <div className="min-w-0 flex-1">
                           <p className="text-[11px] font-medium leading-snug truncate" style={{ color: '#e4e4e7' }}>
                             {f.title}
                           </p>
                           <div className="flex items-center gap-1.5 mt-0.5">
                             <span
-                              className="text-[9px] font-bold px-1 py-0.5 rounded"
+                              className="text-[10px] font-bold px-1 py-0.5 rounded"
                               style={{ background: pcfg.bg, color: pcfg.text }}
                             >
                               {f.priority}
                             </span>
                             {f.dueDate && (
-                              <span className="text-[9px]" style={{ color: '#52525b' }}>
+                              <span className="text-[10px]" style={{ color: '#8a8a93' }}>
                                 {fmtDate(f.dueDate)}
                               </span>
                             )}
@@ -629,6 +648,7 @@ export default function RoadmapBoard() {
   const { features, updateFeature, deleteFeature } = useWorkspaceStore()
   const [view, setView]         = useState<'kanban' | 'timeline'>('kanban')
   const [activeId, setActiveId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
   const [filters, setFilters]   = useState<Filters>({
     priorities: ['P0','P1','P2','P3'],
     assignee:   '',
@@ -713,8 +733,8 @@ export default function RoadmapBoard() {
 
       {/* Stats strip */}
       <div
-        className="flex-shrink-0 flex items-center gap-3 px-3 pb-2 text-[10px]"
-        style={{ color: '#3f3f46' }}
+        className="flex-shrink-0 flex items-center gap-3 px-3 pb-2 text-[11px]"
+        style={{ color: '#7a7a83' }}
       >
         <span>{filtered.length} features</span>
         {COLUMNS.map(c => {
@@ -746,6 +766,7 @@ export default function RoadmapBoard() {
                     col={col}
                     features={filtered.filter(f => f.status === col.id)}
                     onDelete={deleteFeature}
+                    onEdit={setEditingId}
                   />
                 ))}
               </div>
@@ -763,6 +784,8 @@ export default function RoadmapBoard() {
           </div>
         )}
       </div>
+
+      {editingId && <FeatureEditModal featureId={editingId} onClose={() => setEditingId(null)} />}
     </div>
   )
 }

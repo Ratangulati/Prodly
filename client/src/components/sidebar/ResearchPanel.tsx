@@ -6,6 +6,9 @@ import {
   AlertCircle, Lightbulb,
 } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
+import { AIError, isAbort, streamAI, toAIError } from '@/lib/ai'
+import { AIErrorNotice, SlowAINotice, useSlowAI } from '@/components/ui/AIStatus'
+import InsightLibrary from './InsightLibrary'
 import { toast } from '@/lib/toast'
 
 /* ── Types ───────────────────────────────────────────────────────── */
@@ -54,7 +57,7 @@ function LinkFeatureDropdown({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-colors"
+        className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg transition-colors"
         style={{ background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)' }}
       >
         <Link2 size={10} />
@@ -67,7 +70,7 @@ function LinkFeatureDropdown({
           className="absolute left-0 z-50 mt-1 rounded-xl border overflow-hidden shadow-2xl"
           style={{ width: 220, background: '#18181b', borderColor: '#2e2e32', top: '100%' }}
         >
-          <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider border-b" style={{ color: '#52525b', borderColor: '#27272a' }}>
+          <p className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wider border-b" style={{ color: '#8a8a93', borderColor: '#27272a' }}>
             Link to feature
           </p>
           <div className="max-h-48 overflow-y-auto">
@@ -82,7 +85,7 @@ function LinkFeatureDropdown({
                   onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = '#27272a' }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent' }}
                 >
-                  {linked ? <Check size={11} style={{ color: '#818cf8', flexShrink: 0 }} /> : <Plus size={11} style={{ flexShrink: 0, color: '#52525b' }} />}
+                  {linked ? <Check size={11} style={{ color: '#818cf8', flexShrink: 0 }} /> : <Plus size={11} style={{ flexShrink: 0, color: '#8a8a93' }} />}
                   <span className="truncate">{f.title}</span>
                 </button>
               )
@@ -123,7 +126,7 @@ function ThemeCard({
           </h3>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <span
-              className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+              className="text-[10px] font-bold px-1.5 py-0.5 rounded"
               style={{ background: sev.bg, color: sev.color, border: `1px solid ${sev.ring}` }}
             >
               {theme.severity}
@@ -141,10 +144,10 @@ function ThemeCard({
         {/* Frequency bar */}
         <div className="mb-2">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px]" style={{ color: '#52525b' }}>
+            <span className="text-[11px]" style={{ color: '#8a8a93' }}>
               {theme.frequency} of {theme.total} participants · {freqPct}%
             </span>
-            <span className="text-[10px] font-semibold" style={{ color: sev.color }}>{freqPct}%</span>
+            <span className="text-[11px] font-semibold" style={{ color: sev.color }}>{freqPct}%</span>
           </div>
           <div className="h-1 rounded-full overflow-hidden" style={{ background: '#27272a' }}>
             <div
@@ -166,7 +169,7 @@ function ThemeCard({
             style={{ background: 'rgba(99,102,241,0.07)', border: '1px solid rgba(99,102,241,0.15)' }}
           >
             <Lightbulb size={11} className="flex-shrink-0 mt-0.5" style={{ color: '#818cf8' }} />
-            <p className="text-[10px] leading-relaxed" style={{ color: '#818cf8' }}>{theme.opportunity}</p>
+            <p className="text-[11px] leading-relaxed" style={{ color: '#818cf8' }}>{theme.opportunity}</p>
           </div>
         )}
 
@@ -174,7 +177,7 @@ function ThemeCard({
         {theme.quotes.length > 0 && (
           <button
             onClick={() => setExpanded(v => !v)}
-            className="flex items-center gap-1 text-[10px] transition-colors mb-1"
+            className="flex items-center gap-1 text-[11px] transition-colors mb-1"
             style={{ color: expanded ? '#818cf8' : '#52525b' }}
           >
             <Quote size={10} />
@@ -193,8 +196,8 @@ function ThemeCard({
               className="flex items-start gap-2 rounded-lg px-2.5 py-2"
               style={{ background: '#0d0d0f', border: '1px solid #1e1e22' }}
             >
-              <Quote size={10} className="flex-shrink-0 mt-0.5" style={{ color: '#3f3f46' }} />
-              <p className="text-[11px] italic leading-relaxed" style={{ color: '#71717a' }}>
+              <Quote size={10} className="flex-shrink-0 mt-0.5" style={{ color: '#7a7a83' }} />
+              <p className="text-[11px] italic leading-relaxed" style={{ color: '#9d9da6' }}>
                 &ldquo;{q}&rdquo;
               </p>
             </blockquote>
@@ -207,8 +210,8 @@ function ThemeCard({
         {theme.suggestedFeatures.slice(0, 2).map((sf, i) => (
           <span
             key={i}
-            className="text-[10px] px-1.5 py-0.5 rounded"
-            style={{ background: '#1e1e22', color: '#52525b' }}
+            className="text-[11px] px-1.5 py-0.5 rounded"
+            style={{ background: '#1e1e22', color: '#8a8a93' }}
           >
             {sf}
           </span>
@@ -275,15 +278,16 @@ export default function ResearchPanel() {
 
   const [notes, setNotes]       = useState('')
   const [status, setStatus]     = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
-  const [errorMsg, setErrorMsg] = useState('')
+  const [aiError, setAiError] = useState<AIError | null>(null)
   const [parsed, setParsed]     = useState<ParsedResearch | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const slow = useSlowAI(status === 'loading')
 
   /* ── Analyze with AI ─────────────────────────────────────────── */
   const handleAnalyze = useCallback(async () => {
     if (!notes.trim()) return
     setStatus('loading')
-    setErrorMsg('')
+    setAiError(null)
     abortRef.current = new AbortController()
 
     const prompt = `Analyze these user research notes and extract structured insights.
@@ -311,31 +315,14 @@ User research notes to analyze:
 ${notes}`
 
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: abortRef.current.signal,
-        body: JSON.stringify({
-          workflow: 'research',
-          userMessage: prompt,
-          conversationHistory: [],
-        }),
-      })
-
-      if (!res.body) throw new Error('No response body')
-      const reader = res.body.getReader()
-      const dec = new TextDecoder()
-      let full = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        full += dec.decode(value, { stream: true })
-      }
+      const full = await streamAI({ workflow: 'research', userMessage: prompt }, { signal: abortRef.current.signal })
 
       const jsonMatch = full.match(/```(?:json)?\s*([\s\S]*?)```/) || full.match(/(\{[\s\S]*\})/)
-      if (!jsonMatch) throw new Error('Could not parse AI response as JSON')
-      const data: ParsedResearch = JSON.parse(jsonMatch[1])
-      if (!data.themes?.length) throw new Error('No themes found in response')
+      const unreadable = new AIError('failed', "The AI's answer wasn't in the expected format. Please try again.")
+      if (!jsonMatch) throw unreadable
+      let data: ParsedResearch
+      try { data = JSON.parse(jsonMatch[1]) } catch { throw unreadable }
+      if (!data.themes?.length) throw new AIError('failed', "The AI didn't find any themes in these notes. Try adding more detail.")
 
       // Save to Zustand insights store
       data.themes.forEach(t => {
@@ -352,8 +339,8 @@ ${notes}`
       setStatus('done')
       toast.success(`Research analysed — ${data.themes.length} themes found`)
     } catch (err: unknown) {
-      if (err instanceof Error && err.name !== 'AbortError') {
-        setErrorMsg(err.message)
+      if (!isAbort(err)) {
+        setAiError(toAIError(err))
         setStatus('error')
       }
     }
@@ -394,7 +381,7 @@ ${notes}`
           <span className="text-xs font-semibold" style={{ color: '#e4e4e7' }}>Research Insights</span>
           {parsed && (
             <span
-              className="text-[10px] px-1.5 py-0.5 rounded-full"
+              className="text-[11px] px-1.5 py-0.5 rounded-full"
               style={{ background: 'rgba(99,102,241,0.12)', color: '#818cf8' }}
             >
               {parsed.themes.length} themes
@@ -405,10 +392,10 @@ ${notes}`
           {parsed && (
             <button
               onClick={() => exportAsMarkdown(parsed, notes)}
-              className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg transition-colors"
-              style={{ background: '#18181b', color: '#52525b', border: '1px solid #27272a' }}
+              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg transition-colors"
+              style={{ background: '#18181b', color: '#8a8a93', border: '1px solid #27272a' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#a1a1aa' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#52525b' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#8a8a93' }}
               title="Export as Markdown"
             >
               <Download size={11} />
@@ -419,9 +406,9 @@ ${notes}`
             <button
               onClick={handleClear}
               className="p-1 rounded transition-colors"
-              style={{ color: '#3f3f46' }}
+              style={{ color: '#7a7a83' }}
               onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#ef4444' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#3f3f46' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#7a7a83' }}
               title="Clear all"
             >
               <Trash2 size={12} />
@@ -433,7 +420,7 @@ ${notes}`
       {/* Paste zone — hidden after analysis */}
       {!parsed && (
         <div className="flex-shrink-0 p-3">
-          <label className="block text-[10px] font-medium uppercase tracking-wider mb-1.5" style={{ color: '#52525b' }}>
+          <label className="block text-[11px] font-medium uppercase tracking-wider mb-1.5" style={{ color: '#8a8a93' }}>
             Paste interview notes, survey responses, or feedback
           </label>
           <textarea
@@ -458,11 +445,10 @@ User 3: "Navigation feels unintuitive on mobile..."`}
             onBlur={(e)  => { (e.currentTarget as HTMLTextAreaElement).style.borderColor = '#1e1e22' }}
           />
 
-          {status === 'error' && (
-            <div className="mt-2 flex items-start gap-2 px-2.5 py-2 rounded-lg text-[11px]"
-              style={{ background: 'rgba(239,68,68,0.08)', color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }}>
-              <AlertCircle size={11} className="flex-shrink-0 mt-0.5" />
-              {errorMsg}
+          {slow && <div className="mt-2"><SlowAINotice compact /></div>}
+          {status === 'error' && aiError && (
+            <div className="mt-2">
+              <AIErrorNotice compact error={aiError} onRetry={handleAnalyze} />
             </div>
           )}
 
@@ -495,15 +481,15 @@ User 3: "Navigation feels unintuitive on mobile..."`}
               {parsed.participantCount} participants · {parsed.themes.length} themes
             </span>
           </div>
-          <p className="text-[11px] leading-relaxed" style={{ color: '#71717a' }}>
+          <p className="text-[11px] leading-relaxed" style={{ color: '#9d9da6' }}>
             {parsed.researchSummary}
           </p>
           <button
             onClick={() => { setParsed(null); setStatus('idle') }}
-            className="mt-2 text-[10px] transition-colors"
-            style={{ color: '#3f3f46' }}
+            className="mt-2 text-[11px] transition-colors"
+            style={{ color: '#7a7a83' }}
             onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#818cf8' }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#3f3f46' }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#7a7a83' }}
           >
             ← Analyze different notes
           </button>
@@ -528,8 +514,11 @@ User 3: "Navigation feels unintuitive on mobile..."`}
         </div>
       )}
 
+      {/* Saved insights */}
+      {!parsed && status === 'idle' && insights.length > 0 && <InsightLibrary />}
+
       {/* Empty state */}
-      {!parsed && status === 'idle' && !notes && (
+      {!parsed && status === 'idle' && !notes && insights.length === 0 && (
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center gap-3 pb-8">
           <div
             className="flex items-center justify-center rounded-2xl"
@@ -538,7 +527,7 @@ User 3: "Navigation feels unintuitive on mobile..."`}
             <FlaskConical size={20} style={{ color: '#818cf8' }} />
           </div>
           <p className="text-sm font-semibold" style={{ color: '#e4e4e7' }}>Research Synthesizer</p>
-          <p className="text-xs leading-relaxed" style={{ color: '#52525b' }}>
+          <p className="text-xs leading-relaxed" style={{ color: '#8a8a93' }}>
             Paste raw interview notes, survey responses, or customer feedback above.
             AI will surface themes, frequency, quotes, and product opportunities.
           </p>
