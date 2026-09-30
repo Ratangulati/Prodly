@@ -20,6 +20,8 @@ import {
   FileText, BookOpen, BarChart3, LayoutGrid, FlaskConical,
 } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
+import { streamAI, toAIError } from '@/lib/ai'
+import { toast } from '@/lib/toast'
 
 /* ── Types ─────────────────────────────────────────────────────── */
 interface BubblePos { top: number; left: number; fromViewport?: boolean }
@@ -426,29 +428,21 @@ export default function Editor({ docId }: { docId: string }) {
       acceptance: `Generate Gherkin acceptance criteria. Return ONLY the scenarios:\n\n${selectedText}`,
     }
 
+    let slowTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: action === 'acceptance' ? 'stories' : 'general',
-          userMessage: prompts[action],
-          conversationHistory: [],
-        }),
+      // Explain long waits instead of looking frozen
+      slowTimer = setTimeout(() => toast.info('The AI is taking longer than usual: models are busy, trying a backup…'), 10_000)
+      const result = await streamAI({
+        workflow: action === 'acceptance' ? 'stories' : 'general',
+        userMessage: prompts[action],
       })
-      if (!res.body) return
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let result = ''
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        result += decoder.decode(value, { stream: true })
-      }
+      // Only replace the selection once a full answer has arrived; errors never touch the document
       editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, result.trim()).run()
     } catch (err) {
-      console.error('AI error', err)
+      const aiError = toAIError(err)
+      toast.error(`${aiError.title}. ${aiError.message}`)
     } finally {
+      clearTimeout(slowTimer)
       setAiLoading(null)
     }
   }, [editor, selectedText])
@@ -506,7 +500,7 @@ export default function Editor({ docId }: { docId: string }) {
 
           {/* AI section divider */}
           <div className="w-px h-4 mx-1" style={{ background: '#2e2e32' }} />
-          <span className="flex items-center gap-1 px-1.5 text-[10px] font-semibold" style={{ color: '#6366f1' }}>
+          <span className="flex items-center gap-1 px-1.5 text-[11px] font-semibold" style={{ color: '#6366f1' }}>
             <Wand2 size={10} /> AI
           </span>
 
@@ -545,7 +539,7 @@ export default function Editor({ docId }: { docId: string }) {
           onMouseDown={(e) => e.preventDefault()}
         >
           <div className="px-3 py-2 border-b" style={{ borderColor: '#2e2e32' }}>
-            <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: '#52525b' }}>
+            <span className="text-[11px] font-semibold uppercase tracking-widest" style={{ color: '#8a8a93' }}>
               Insert template
             </span>
           </div>
@@ -577,13 +571,13 @@ export default function Editor({ docId }: { docId: string }) {
                   <p className="text-sm font-medium" style={{ color: active ? '#e4e4e7' : '#a1a1aa' }}>
                     {cmd.label}
                   </p>
-                  <p className="text-xs truncate" style={{ color: '#52525b' }}>
+                  <p className="text-xs truncate" style={{ color: '#8a8a93' }}>
                     {cmd.description}
                   </p>
                 </div>
                 <span
-                  className="ml-auto text-[10px] px-1.5 py-0.5 rounded font-mono flex-shrink-0"
-                  style={{ background: '#27272a', color: '#52525b' }}
+                  className="ml-auto text-[11px] px-1.5 py-0.5 rounded font-mono flex-shrink-0"
+                  style={{ background: '#27272a', color: '#8a8a93' }}
                 >
                   /{cmd.id}
                 </span>
@@ -591,9 +585,9 @@ export default function Editor({ docId }: { docId: string }) {
             )
           })}
           <div className="px-3 py-1.5 border-t flex items-center gap-3" style={{ borderColor: '#2e2e32' }}>
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>↑↓ navigate</span>
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>↵ insert</span>
-            <span className="text-[10px]" style={{ color: '#3f3f46' }}>Esc dismiss</span>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>↑↓ navigate</span>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>↵ insert</span>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>Esc dismiss</span>
           </div>
         </div>
       )}
@@ -611,24 +605,24 @@ export default function Editor({ docId }: { docId: string }) {
         className="flex items-center gap-4 px-8 py-2 border-t flex-shrink-0 select-none"
         style={{ borderColor: '#1a1a1a', background: '#0d0d0d' }}
       >
-        <span className="text-[11px]" style={{ color: '#3f3f46' }}>
+        <span className="text-[11px]" style={{ color: '#7a7a83' }}>
           {wordCount.toLocaleString()} {wordCount === 1 ? 'word' : 'words'}
         </span>
-        <span className="text-[11px]" style={{ color: '#3f3f46' }}>·</span>
-        <span className="text-[11px]" style={{ color: '#3f3f46' }}>
+        <span className="text-[11px]" style={{ color: '#7a7a83' }}>·</span>
+        <span className="text-[11px]" style={{ color: '#7a7a83' }}>
           {readTime} min read
         </span>
         {aiLoading && (
           <>
-            <span className="text-[11px]" style={{ color: '#3f3f46' }}>·</span>
+            <span className="text-[11px]" style={{ color: '#7a7a83' }}>·</span>
             <span className="flex items-center gap-1.5 text-[11px]" style={{ color: '#6366f1' }}>
               <span className="animate-spin inline-block"><Wand2 size={10} /></span>
               AI writing…
             </span>
           </>
         )}
-        <span className="ml-auto text-[11px]" style={{ color: '#3f3f46' }}>
-          Type <kbd className="px-1 py-0.5 rounded text-[10px]" style={{ background: '#1e1e1e', color: '#52525b', border: '1px solid #2a2a2a' }}>/</kbd> for templates
+        <span className="ml-auto text-[11px]" style={{ color: '#7a7a83' }}>
+          Type <kbd className="px-1 py-0.5 rounded text-[11px]" style={{ background: '#1e1e1e', color: '#8a8a93', border: '1px solid #2a2a2a' }}>/</kbd> for templates
         </span>
       </div>
     </div>

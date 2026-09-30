@@ -7,6 +7,8 @@ import Typography from '@tiptap/extension-typography'
 import Highlight from '@tiptap/extension-highlight'
 import { Wand2, Minimize2, Briefcase, ListChecks } from 'lucide-react'
 import { useWorkspaceStore } from '@/lib/store'
+import { streamAI, toAIError } from '@/lib/ai'
+import { toast } from '@/lib/toast'
 
 interface BubblePos { top: number; left: number }
 
@@ -95,29 +97,21 @@ export default function TiptapEditor({ docId }: { docId: string }) {
       acceptance: `Generate Gherkin acceptance criteria for this. Return ONLY the Gherkin scenarios:\n\n${selectedText}`,
     }
 
+    let slowTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: action === 'acceptance' ? 'stories' : 'general',
-          userMessage: promptMap[action],
-          conversationHistory: [],
-        }),
+      // Explain long waits instead of looking frozen
+      slowTimer = setTimeout(() => toast.info('The AI is taking longer than usual: models are busy, trying a backup…'), 10_000)
+      const result = await streamAI({
+        workflow: action === 'acceptance' ? 'stories' : 'general',
+        userMessage: promptMap[action],
       })
-      if (!res.body) return
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let result = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        result += decoder.decode(value, { stream: true })
-      }
+      // Only replace the selection once a full answer has arrived; errors never touch the document
       editor.chain().focus().deleteRange({ from, to }).insertContentAt(from, result.trim()).run()
     } catch (err) {
-      console.error('Inline AI error', err)
+      const aiError = toAIError(err)
+      toast.error(`${aiError.title}. ${aiError.message}`)
     } finally {
+      clearTimeout(slowTimer)
       setAiLoading(null)
     }
   }, [editor, selectedText])
@@ -139,7 +133,7 @@ export default function TiptapEditor({ docId }: { docId: string }) {
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >
-          <span className="flex items-center gap-1 px-2 text-[10px] font-medium border-r mr-1" style={{ color: '#6366f1', borderColor: '#2a2a2a' }}>
+          <span className="flex items-center gap-1 px-2 text-[11px] font-medium border-r mr-1" style={{ color: '#6366f1', borderColor: '#2a2a2a' }}>
             <Wand2 size={10} />
             AI
           </span>
