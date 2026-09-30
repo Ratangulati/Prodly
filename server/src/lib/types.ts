@@ -6,3 +6,4 @@ export type AIWorkflow =
   | 'research'
   | 'data'
   | 'general'
+  | 'update'
